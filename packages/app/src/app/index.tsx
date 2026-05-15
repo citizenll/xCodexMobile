@@ -5,7 +5,7 @@ import { useEarliestOnlineHostServerId, useHostRuntimeBootstrapState } from "@/a
 import {
   resolveStartupRedirectRoute,
   resolveStartupWorkspaceSelection,
-} from "@/app/host-runtime-bootstrap";
+} from "@/runtime/host-runtime-bootstrap";
 import {
   navigateToWorkspace,
   useActiveWorkspaceSelection,

@@ -30,6 +30,7 @@ import {
   type ProjectPlacementPayload,
   type WorkspaceSetupSnapshot,
   type WorkspaceDescriptorPayload,
+  type AgentStreamEventPayload,
 } from "./messages.js";
 import type { TerminalManager } from "../terminal/terminal-manager.js";
 import { TerminalSessionController } from "../terminal/terminal-session-controller.js";
@@ -82,11 +83,13 @@ import type { DaemonConfigStore } from "./daemon-config-store.js";
 import { applyMutableProviderConfigToOverrides } from "./daemon-config-store.js";
 import { getErrorMessage, getErrorMessageOr } from "../shared/error-utils.js";
 import { getAgentStatusPriority } from "../shared/agent-state-bucket.js";
+import type { DaemonConnectorMode } from "./persisted-config.js";
 import type {
   WorkspaceGitRuntimeSnapshot,
   WorkspaceGitService,
   WorkspaceGitSnapshotOptions,
 } from "./workspace-git-service.js";
+import type { XcodexBridgeAppServerEvent, XcodexBridgeClient } from "./xcodex-bridge.js";
 
 import { buildProviderRegistry } from "./agent/provider-registry.js";
 import type {
@@ -477,6 +480,18 @@ type FetchWorkspacesResponsePayload = Extract<
 >["payload"];
 type FetchWorkspacesResponseEntry = FetchWorkspacesResponsePayload["entries"][number];
 type FetchWorkspacesResponsePageInfo = FetchWorkspacesResponsePayload["pageInfo"];
+type FetchAgentTimelineRequestMessage = Extract<
+  SessionInboundMessage,
+  { type: "fetch_agent_timeline_request" }
+>;
+interface AgentTimelineFetchOptions {
+  direction: AgentTimelineFetchDirection;
+  projection: TimelineProjectionMode;
+  requestedLimit: number | undefined;
+  limit: number | undefined;
+  shouldLimitByProjectedWindow: boolean;
+  cursor: AgentTimelineCursor | undefined;
+}
 type WorkspaceUpdatePayload = Extract<
   SessionOutboundMessage,
   { type: "workspace_update" }
@@ -497,6 +512,50 @@ class SessionRequestError extends Error {
     super(message);
     this.name = "SessionRequestError";
   }
+}
+
+function buildSnapshotLatestActivityByWorkspaceId(
+  entries: FetchWorkspacesResponseEntry[],
+): Map<string, number> {
+  const latestActivityByWorkspaceId = new Map<string, number>();
+  for (const entry of entries) {
+    const parsedLatestActivity = entry.activityAt
+      ? Date.parse(entry.activityAt)
+      : Number.NEGATIVE_INFINITY;
+    if (!Number.isNaN(parsedLatestActivity)) {
+      latestActivityByWorkspaceId.set(entry.id, parsedLatestActivity);
+    }
+  }
+  return latestActivityByWorkspaceId;
+}
+
+function resolveAgentTimelineFetchOptions(
+  msg: FetchAgentTimelineRequestMessage,
+): AgentTimelineFetchOptions {
+  const direction: AgentTimelineFetchDirection = msg.direction ?? (msg.cursor ? "after" : "tail");
+  const projection: TimelineProjectionMode = msg.projection ?? "projected";
+  const requestedLimit = msg.limit;
+  const limit = requestedLimit ?? (direction === "after" ? 0 : undefined);
+  const shouldLimitByProjectedWindow =
+    projection === "canonical" &&
+    direction === "tail" &&
+    typeof requestedLimit === "number" &&
+    requestedLimit > 0;
+  const cursor = msg.cursor
+    ? {
+        epoch: msg.cursor.epoch,
+        seq: msg.cursor.seq,
+      }
+    : undefined;
+
+  return {
+    direction,
+    projection,
+    requestedLimit,
+    limit,
+    shouldLimitByProjectedWindow,
+    cursor,
+  };
 }
 
 const PCM_SAMPLE_RATE = 16000;
@@ -552,10 +611,10 @@ export interface SessionOptions {
   agentStorage: AgentStorage;
   projectRegistry: ProjectRegistry;
   workspaceRegistry: WorkspaceRegistry;
-  chatService: FileBackedChatService;
-  scheduleService: ScheduleService;
-  loopService: LoopService;
-  checkoutDiffManager: CheckoutDiffManager;
+  chatService: FileBackedChatService | null;
+  scheduleService: ScheduleService | null;
+  loopService: LoopService | null;
+  checkoutDiffManager: CheckoutDiffManager | null;
   github?: GitHubService;
   createAgentMcpTransport?: AgentMcpTransportFactory;
   workspaceGitService: WorkspaceGitService;
@@ -594,6 +653,9 @@ export interface SessionOptions {
   };
   agentProviderRuntimeSettings?: AgentProviderRuntimeSettingsMap;
   providerOverrides?: Record<string, ProviderOverride>;
+  xcodexBridge?: XcodexBridgeClient | null;
+  agentRuntimeEnabled?: boolean;
+  connectorMode?: DaemonConnectorMode;
   isDev?: boolean;
 }
 
@@ -738,10 +800,10 @@ export class Session {
   private readonly agentStorage: AgentStorage;
   private readonly projectRegistry: ProjectRegistry;
   private readonly workspaceRegistry: WorkspaceRegistry;
-  private readonly chatService: FileBackedChatService;
-  private readonly scheduleService: ScheduleService;
-  private readonly loopService: LoopService;
-  private readonly checkoutDiffManager: CheckoutDiffManager;
+  private readonly chatService: FileBackedChatService | null;
+  private readonly scheduleService: ScheduleService | null;
+  private readonly loopService: LoopService | null;
+  private readonly checkoutDiffManager: CheckoutDiffManager | null;
   private readonly github: GitHubService;
   private readonly workspaceGitService: WorkspaceGitService;
   private readonly daemonConfigStore: DaemonConfigStore;
@@ -749,6 +811,7 @@ export class Session {
   private readonly downloadTokenStore: DownloadTokenStore;
   private readonly pushTokenStore: PushTokenStore;
   private unsubscribeAgentEvents: (() => void) | null = null;
+  private unsubscribeXcodexEvents: (() => void) | null = null;
   private agentUpdatesSubscription: AgentUpdatesSubscriptionState | null = null;
   private workspaceUpdatesSubscription: WorkspaceUpdatesSubscriptionState | null = null;
   private clientActivity: {
@@ -804,6 +867,10 @@ export class Session {
   private readonly sttLanguage: string;
   private readonly agentProviderRuntimeSettings: AgentProviderRuntimeSettingsMap | undefined;
   private readonly providerOverrides: Record<string, ProviderOverride> | undefined;
+  private readonly xcodexBridge: XcodexBridgeClient | null;
+  private readonly agentRuntimeEnabled: boolean;
+  private readonly connectorMode: DaemonConnectorMode;
+  private readonly xcodexConnectorOnly: boolean;
   private readonly isDev: boolean;
   private voiceModeAgentId: string | null = null;
   private voiceModeBaseConfig: VoiceModeBaseConfig | null = null;
@@ -849,6 +916,9 @@ export class Session {
       dictation,
       agentProviderRuntimeSettings,
       providerOverrides,
+      xcodexBridge,
+      agentRuntimeEnabled,
+      connectorMode,
       isDev,
     } = options;
     this.clientId = clientId;
@@ -900,6 +970,10 @@ export class Session {
     this.bindVoiceBridges({ voice, voiceBridge, dictation });
     this.agentProviderRuntimeSettings = agentProviderRuntimeSettings;
     this.providerOverrides = providerOverrides;
+    this.xcodexBridge = xcodexBridge ?? null;
+    this.connectorMode = connectorMode ?? "xcodex";
+    this.xcodexConnectorOnly = this.connectorMode === "xcodex";
+    this.agentRuntimeEnabled = !this.xcodexConnectorOnly && agentRuntimeEnabled === true;
     this.isDev = isDev === true;
     this.abortController = new AbortController();
     this.workspaceDirectory = new WorkspaceDirectory({
@@ -917,7 +991,13 @@ export class Session {
     void this.initializeAgentMcp();
     this.subscribeToAgentEvents();
 
-    this.sessionLogger.trace({}, "agent.session.lifecycle.created");
+    this.sessionLogger.trace(
+      {
+        connectorMode: this.connectorMode,
+        agentRuntimeEnabled: this.agentRuntimeEnabled,
+      },
+      "agent.session.lifecycle.created",
+    );
   }
 
   updateAppVersion(appVersion: string | null): void {
@@ -1230,9 +1310,144 @@ export class Session {
     });
   }
 
+  private recordFromUnknown(value: unknown): Record<string, unknown> | null {
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  }
+
+  private stringField(record: Record<string, unknown> | null, keys: string[]): string | null {
+    if (!record) return null;
+    for (const key of keys) {
+      const value = record[key];
+      if (typeof value === "string" && value.trim().length > 0) {
+        return value.trim();
+      }
+    }
+    return null;
+  }
+
+  private xcodexThreadIdFromEvent(event: XcodexBridgeAppServerEvent): string | null {
+    const message = this.recordFromUnknown(event.payload.message);
+    const params = this.recordFromUnknown(message?.params);
+    return (
+      this.stringField(params, ["threadId", "thread_id"]) ??
+      this.stringField(this.recordFromUnknown(params?.turn), ["threadId", "thread_id"]) ??
+      this.stringField(this.recordFromUnknown(params?.item), ["threadId", "thread_id"]) ??
+      this.stringField(this.recordFromUnknown(params?.thread), ["id", "threadId", "thread_id"])
+    );
+  }
+
+  private xcodexEventTimestamp(event: XcodexBridgeAppServerEvent): string {
+    const emittedAtMs =
+      typeof event.payload.emittedAtMs === "number" ? event.payload.emittedAtMs : Date.now();
+    return new Date(emittedAtMs).toISOString();
+  }
+
+  private xcodexStreamEventFromAppServer(
+    event: XcodexBridgeAppServerEvent,
+  ): AgentStreamEventPayload | null {
+    const message = this.recordFromUnknown(event.payload.message);
+    const method = typeof message?.method === "string" ? message.method : "";
+    const params = this.recordFromUnknown(message?.params);
+    const turn = this.recordFromUnknown(params?.turn);
+    const status = this.stringField(turn, ["status"]);
+    const error = this.recordFromUnknown(turn?.error);
+    const errorMessage =
+      this.stringField(error, ["message"]) ??
+      this.stringField(params, ["error", "message"]) ??
+      "xCodex turn failed";
+
+    if (method === "turn/started") {
+      return { type: "turn_started", provider: "xcodex" };
+    }
+    if (method === "turn/failed") {
+      return {
+        type: "turn_failed",
+        provider: "xcodex",
+        error: errorMessage,
+      };
+    }
+    if (method === "turn/canceled" || method === "turn/cancelled") {
+      return {
+        type: "turn_canceled",
+        provider: "xcodex",
+        reason: "canceled",
+      };
+    }
+    if (method === "turn/completed") {
+      if (status === "failed") {
+        return {
+          type: "turn_failed",
+          provider: "xcodex",
+          error: errorMessage,
+        };
+      }
+      if (status === "canceled" || status === "cancelled") {
+        return {
+          type: "turn_canceled",
+          provider: "xcodex",
+          reason: "canceled",
+        };
+      }
+      return { type: "turn_completed", provider: "xcodex" };
+    }
+    return null;
+  }
+
+  private async forwardXcodexAgentUpdate(agentId: string): Promise<void> {
+    if (!this.xcodexBridge) return;
+    try {
+      const agent = await this.xcodexBridge.getAgentPayloadById(agentId);
+      const subscription = this.agentUpdatesSubscription;
+      if (!agent || !subscription) return;
+      const project = this.xcodexBridge.buildProjectPlacement(agent);
+      const matches = this.matchesAgentFilter({
+        agent,
+        project,
+        filter: subscription.filter,
+      });
+      this.bufferOrEmitAgentUpdate(
+        subscription,
+        matches ? { kind: "upsert", agent, project } : { kind: "remove", agentId },
+      );
+    } catch (error) {
+      this.sessionLogger.debug({ err: error, agentId }, "Failed to forward xCodex agent update");
+    }
+  }
+
+  private handleXcodexAppServerEvent(event: XcodexBridgeAppServerEvent): void {
+    const threadId = this.xcodexThreadIdFromEvent(event);
+    if (!threadId) return;
+    const agentId = `xcodex:${event.payload.workspaceId}:${threadId}`;
+    const streamEvent = this.xcodexStreamEventFromAppServer(event);
+    if (streamEvent && !this.shouldSkipAgentStreamForward(agentId)) {
+      this.emit({
+        type: "agent_stream",
+        payload: {
+          agentId,
+          event: streamEvent,
+          timestamp: this.xcodexEventTimestamp(event),
+          seq: typeof event.seq === "number" ? event.seq : undefined,
+          epoch: agentId,
+        },
+      });
+    }
+    void this.forwardXcodexAgentUpdate(agentId);
+  }
+
   private subscribeToAgentEvents(): void {
     if (this.unsubscribeAgentEvents) {
       this.unsubscribeAgentEvents();
+    }
+    if (this.unsubscribeXcodexEvents) {
+      this.unsubscribeXcodexEvents();
+      this.unsubscribeXcodexEvents = null;
+    }
+    if (this.xcodexBridge) {
+      this.unsubscribeXcodexEvents = this.xcodexBridge.subscribeEvents((event) =>
+        this.handleXcodexAppServerEvent(event),
+      );
     }
 
     this.unsubscribeAgentEvents = this.agentManager.subscribe(
@@ -1373,6 +1588,9 @@ export class Session {
   }
 
   private getProviderRegistry(): ReturnType<typeof buildProviderRegistry> {
+    if (!this.agentRuntimeEnabled) {
+      return {};
+    }
     return buildProviderRegistry(this.sessionLogger, {
       runtimeSettings: this.agentProviderRuntimeSettings,
       providerOverrides: applyMutableProviderConfigToOverrides(
@@ -1715,6 +1933,15 @@ export class Session {
   }
 
   private async dispatchInboundMessage(msg: SessionInboundMessage): Promise<void> {
+    if (this.xcodexConnectorOnly) {
+      const handled = await this.dispatchXcodexConnectorMessage(msg);
+      if (handled) {
+        return;
+      }
+      this.rejectXcodexConnectorMutation(msg);
+      return;
+    }
+
     const promise =
       this.dispatchVoiceAndControlMessage(msg) ??
       this.dispatchAgentLifecycleMessage(msg) ??
@@ -1726,6 +1953,85 @@ export class Session {
       this.dispatchChatScheduleLoopMessage(msg) ??
       this.dispatchMiscMessage(msg);
     if (promise) await promise;
+  }
+
+  private async dispatchXcodexConnectorMessage(msg: SessionInboundMessage): Promise<boolean> {
+    switch (msg.type) {
+      case "client_heartbeat":
+        this.handleClientHeartbeat(msg);
+        return true;
+      case "ping": {
+        const now = Date.now();
+        this.emit({
+          type: "pong",
+          payload: {
+            requestId: msg.requestId,
+            clientSentAt: msg.clientSentAt,
+            serverReceivedAt: now,
+            serverSentAt: now,
+          },
+        });
+        return true;
+      }
+      case "register_push_token":
+        this.handleRegisterPushToken(msg.token);
+        return true;
+      case "restart_server_request":
+        await this.handleRestartServerRequest(msg.requestId, msg.reason);
+        return true;
+      case "shutdown_server_request":
+        await this.handleShutdownServerRequest(msg.requestId);
+        return true;
+      case "get_daemon_config_request":
+        this.emit({
+          type: "get_daemon_config_response",
+          payload: { requestId: msg.requestId, config: this.daemonConfigStore.get() },
+        });
+        return true;
+      case "fetch_agents_request":
+        await this.handleFetchAgents(msg);
+        return true;
+      case "fetch_agent_history_request":
+        await this.handleFetchAgentHistory(msg);
+        return true;
+      case "fetch_agent_request":
+        await this.handleFetchAgent(msg.agentId, msg.requestId);
+        return true;
+      case "fetch_agent_timeline_request":
+        await this.handleFetchAgentTimelineRequest(msg);
+        return true;
+      case "fetch_workspaces_request":
+        await this.handleFetchWorkspacesRequest(msg);
+        return true;
+      case "list_available_providers_request":
+        await this.handleListAvailableProvidersRequest(msg);
+        return true;
+      case "get_providers_snapshot_request":
+        await this.handleGetProvidersSnapshotRequest(msg);
+        return true;
+      case "refresh_providers_snapshot_request":
+        await this.handleRefreshProvidersSnapshotRequest(msg);
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private rejectXcodexConnectorMutation(msg: SessionInboundMessage): void {
+    const requestId =
+      "requestId" in msg && typeof msg.requestId === "string" ? msg.requestId : undefined;
+    if (!requestId) {
+      return;
+    }
+    this.emit({
+      type: "rpc_error",
+      payload: {
+        requestId,
+        requestType: msg.type,
+        error: "xCodex connector mode is read-only; use xCodex Desktop for mutations.",
+        code: "xcodex_connector_read_only",
+      },
+    });
   }
 
   private dispatchVoiceAndControlMessage(msg: SessionInboundMessage): Promise<void> | undefined {
@@ -3413,6 +3719,22 @@ export class Session {
     this.sessionLogger.info({ agentId }, `Cancel request received for agent ${agentId}`);
 
     try {
+      if (this.xcodexBridge?.isVirtualAgentId(agentId)) {
+        await this.xcodexBridge.cancelAgent(agentId);
+        if (requestId) {
+          const agent = await this.xcodexBridge.getAgentPayloadById(agentId);
+          this.emit({
+            type: "cancel_agent_response",
+            payload: {
+              requestId,
+              agentId,
+              agent,
+            },
+          });
+        }
+        return;
+      }
+
       await this.interruptAgentIfRunning(agentId);
       if (requestId) {
         const agent = this.agentManager.getAgent(agentId);
@@ -3817,6 +4139,18 @@ export class Session {
     msg: Extract<SessionInboundMessage, { type: "list_available_providers_request" }>,
   ): Promise<void> {
     const fetchedAt = new Date().toISOString();
+    if (this.xcodexConnectorOnly) {
+      this.emit({
+        type: "list_available_providers_response",
+        payload: {
+          providers: [],
+          error: null,
+          fetchedAt,
+          requestId: msg.requestId,
+        },
+      });
+      return;
+    }
     try {
       const providers = (await this.agentManager.listProviderAvailability()).filter((provider) =>
         this.isProviderVisibleToClient(provider.provider),
@@ -3847,6 +4181,18 @@ export class Session {
   private async handleGetProvidersSnapshotRequest(
     msg: Extract<SessionInboundMessage, { type: "get_providers_snapshot_request" }>,
   ): Promise<void> {
+    if (this.xcodexConnectorOnly) {
+      this.emit({
+        type: "get_providers_snapshot_response",
+        payload: {
+          entries: [],
+          generatedAt: new Date().toISOString(),
+          requestId: msg.requestId,
+        },
+      });
+      return;
+    }
+
     // COMPAT(providersSnapshot): keep legacy provider-list RPCs alongside snapshot flow.
     const entries = this.providerSnapshotManager
       ? this.providerSnapshotManager
@@ -3867,12 +4213,12 @@ export class Session {
   private async handleRefreshProvidersSnapshotRequest(
     msg: Extract<SessionInboundMessage, { type: "refresh_providers_snapshot_request" }>,
   ): Promise<void> {
-    if (msg.cwd) {
+    if (!this.xcodexConnectorOnly && msg.cwd) {
       await this.providerSnapshotManager?.refreshSnapshotForCwd({
         cwd: expandTilde(msg.cwd),
         providers: msg.providers,
       });
-    } else {
+    } else if (!this.xcodexConnectorOnly) {
       await this.providerSnapshotManager?.refreshSettingsSnapshot({
         providers: msg.providers,
       });
@@ -4861,6 +5207,18 @@ export class Session {
     const cwd = expandTilde(msg.cwd);
     this.checkoutDiffSubscriptions.get(msg.subscriptionId)?.();
     this.checkoutDiffSubscriptions.delete(msg.subscriptionId);
+    if (!this.checkoutDiffManager) {
+      this.emit({
+        type: "rpc_error",
+        payload: {
+          requestId: msg.requestId,
+          requestType: msg.type,
+          error: "Checkout diff is unavailable in xCodex connector mode.",
+          code: "checkout_diff_unavailable",
+        },
+      });
+      return;
+    }
     const subscription = await this.checkoutDiffManager.subscribe(
       { cwd, compare: msg.compare },
       (snapshot) => {
@@ -4923,7 +5281,7 @@ export class Session {
 
     try {
       const checkoutResult = await this.checkoutExistingBranch(cwd, branch);
-      this.checkoutDiffManager.scheduleRefreshForCwd(cwd);
+      this.checkoutDiffManager?.scheduleRefreshForCwd(cwd);
 
       // Push a workspace_update immediately so the sidebar/header reflect
       // the new branch name without waiting for the background git watcher.
@@ -4973,7 +5331,7 @@ export class Session {
         cwd,
       });
       await this.notifyGitMutation(cwd, "stash-push");
-      this.checkoutDiffManager.scheduleRefreshForCwd(cwd);
+      this.checkoutDiffManager?.scheduleRefreshForCwd(cwd);
       this.emit({
         type: "stash_save_response",
         payload: { cwd, success: true, error: null, requestId },
@@ -4995,7 +5353,7 @@ export class Session {
         cwd,
       });
       await this.notifyGitMutation(cwd, "stash-pop");
-      this.checkoutDiffManager.scheduleRefreshForCwd(cwd);
+      this.checkoutDiffManager?.scheduleRefreshForCwd(cwd);
       this.emit({
         type: "stash_pop_response",
         payload: { cwd, success: true, error: null, requestId },
@@ -5047,7 +5405,7 @@ export class Session {
         addAll: msg.addAll ?? true,
       });
       await this.notifyGitMutation(cwd, "commit-changes");
-      this.checkoutDiffManager.scheduleRefreshForCwd(cwd);
+      this.checkoutDiffManager?.scheduleRefreshForCwd(cwd);
 
       this.emit({
         type: "checkout_commit_response",
@@ -5108,7 +5466,7 @@ export class Session {
         this.notifyGitMutation(mutatedCwd, "merge-to-base", { invalidateGithub: true }),
         ...(mutatedCwd !== cwd ? [this.notifyGitMutation(cwd, "merge-to-base")] : []),
       ]);
-      this.checkoutDiffManager.scheduleRefreshForCwd(cwd);
+      this.checkoutDiffManager?.scheduleRefreshForCwd(cwd);
 
       this.emit({
         type: "checkout_merge_response",
@@ -5150,7 +5508,7 @@ export class Session {
         requireCleanTarget: msg.requireCleanTarget ?? true,
       });
       await this.notifyGitMutation(cwd, "merge-from-base", { invalidateGithub: true });
-      this.checkoutDiffManager.scheduleRefreshForCwd(cwd);
+      this.checkoutDiffManager?.scheduleRefreshForCwd(cwd);
 
       this.emit({
         type: "checkout_merge_from_base_response",
@@ -5182,7 +5540,7 @@ export class Session {
     try {
       await pullCurrentBranch(cwd);
       await this.notifyGitMutation(cwd, "pull", { invalidateGithub: true });
-      this.checkoutDiffManager.scheduleRefreshForCwd(cwd);
+      this.checkoutDiffManager?.scheduleRefreshForCwd(cwd);
 
       this.emit({
         type: "checkout_pull_response",
@@ -5797,6 +6155,18 @@ export class Session {
     labels?: Record<string, string>;
     includeUnavailablePersisted?: boolean;
   }): Promise<AgentSnapshotPayload[]> {
+    if (this.xcodexConnectorOnly) {
+      let agents = this.xcodexBridge ? await this.xcodexBridge.listAgentPayloads() : [];
+      agents = agents.filter((agent) => this.isProviderVisibleToClient(agent.provider));
+      if (filter?.labels) {
+        const filterLabels = filter.labels;
+        agents = agents.filter((agent) =>
+          Object.entries(filterLabels).every(([key, value]) => agent.labels[key] === value),
+        );
+      }
+      return agents;
+    }
+
     // Get live agents with session modes
     const agentSnapshots = this.agentManager.listAgents();
     const liveAgents = await Promise.all(
@@ -5817,7 +6187,8 @@ export class Session {
       )
       .map((record) => this.buildStoredAgentPayload(record, registeredProviderIds));
 
-    let agents = [...liveAgents, ...persistedAgents];
+    const xcodexAgents = this.xcodexBridge ? await this.xcodexBridge.listAgentPayloads() : [];
+    let agents = [...liveAgents, ...persistedAgents, ...xcodexAgents];
 
     agents = agents.filter((agent) => this.isProviderVisibleToClient(agent.provider));
 
@@ -5840,9 +6211,14 @@ export class Session {
       return { ok: false, error: "Agent identifier cannot be empty" };
     }
 
-    const stored = await this.agentStorage.list();
-    const storedRecords = stored.filter((record) => !record.internal);
+    const storedRecords = this.xcodexConnectorOnly
+      ? []
+      : (await this.agentStorage.list()).filter((record) => !record.internal);
     const knownIds = new Set<string>();
+    const xcodexAgents = this.xcodexBridge ? await this.xcodexBridge.listAgentPayloads() : [];
+    for (const agent of xcodexAgents) {
+      knownIds.add(agent.id);
+    }
     for (const record of storedRecords) {
       knownIds.add(record.id);
     }
@@ -5886,6 +6262,14 @@ export class Session {
   }
 
   private async getAgentPayloadById(agentId: string): Promise<AgentSnapshotPayload | null> {
+    if (this.xcodexBridge?.isVirtualAgentId(agentId)) {
+      return this.xcodexBridge.getAgentPayloadById(agentId);
+    }
+
+    if (this.xcodexConnectorOnly) {
+      return null;
+    }
+
     const live = this.agentManager.getAgent(agentId);
     if (live) {
       const payload = await this.buildAgentPayload(live);
@@ -5949,7 +6333,9 @@ export class Session {
       const batch = candidates.slice(start, start + batchSize);
       const batchEntries = await Promise.all(
         batch.map(async (agent) => {
-          const project = await getPlacement(agent.cwd);
+          const project = this.xcodexBridge?.isVirtualAgentId(agent.id)
+            ? this.xcodexBridge.buildProjectPlacement(agent)
+            : await getPlacement(agent.cwd);
           return project ? { agent, project } : null;
         }),
       );
@@ -5992,7 +6378,9 @@ export class Session {
       includeUnavailablePersisted: request.type === "fetch_agent_history_request",
     });
     const activePlacementsByCwd =
-      scope === "active" ? await this.buildActiveProjectPlacementsByWorkspaceCwd() : null;
+      !this.xcodexConnectorOnly && scope === "active"
+        ? await this.buildActiveProjectPlacementsByWorkspaceCwd()
+        : null;
     if (activePlacementsByCwd) {
       agents = agents.filter(
         (agent) =>
@@ -6805,83 +7193,155 @@ export class Session {
     }
   }
 
+  private logFetchWorkspacesRequest(
+    request: FetchWorkspacesRequestMessage,
+    subscriptionId: string | null,
+  ): void {
+    this.sessionLogger.debug(
+      {
+        requestId: request.requestId,
+        subscriptionId,
+        subscribeRequested: Boolean(request.subscribe),
+        filter: request.filter ?? null,
+        sort: request.sort ?? null,
+        page: request.page ?? null,
+      },
+      "fetch_workspaces_request_received",
+    );
+  }
+
+  private beginWorkspaceUpdatesSubscription(
+    subscriptionId: string | null,
+    request: FetchWorkspacesRequestMessage,
+  ): void {
+    if (!subscriptionId) {
+      return;
+    }
+    this.workspaceUpdatesSubscription = {
+      subscriptionId,
+      filter: request.filter,
+      isBootstrapping: true,
+      pendingUpdatesByWorkspaceId: new Map(),
+      lastEmittedByWorkspaceId: new Map(),
+    };
+  }
+
+  private async listFetchWorkspacesPayload(request: FetchWorkspacesRequestMessage): Promise<{
+    entries: FetchWorkspacesResponseEntry[];
+    pageInfo: FetchWorkspacesResponsePageInfo;
+  }> {
+    if (this.xcodexConnectorOnly) {
+      return await this.listXcodexFetchWorkspacesEntries(request);
+    }
+    const payload = await this.listFetchWorkspacesEntries(request);
+    this.syncWorkspaceGitObservers(payload.entries);
+    return payload;
+  }
+
+  private emitFetchWorkspacesResponse(
+    request: FetchWorkspacesRequestMessage,
+    subscriptionId: string | null,
+    payload: {
+      entries: FetchWorkspacesResponseEntry[];
+      pageInfo: FetchWorkspacesResponsePageInfo;
+    },
+  ): void {
+    this.sessionLogger.debug(
+      {
+        requestId: request.requestId,
+        subscriptionId,
+        pageInfo: payload.pageInfo,
+        payload: summarizeFetchWorkspacesEntries(payload.entries),
+      },
+      "fetch_workspaces_response_ready",
+    );
+    this.emit({
+      type: "fetch_workspaces_response",
+      payload: {
+        requestId: request.requestId,
+        ...(subscriptionId ? { subscriptionId } : {}),
+        ...payload,
+      },
+    });
+  }
+
+  private finishWorkspaceUpdatesBootstrap(
+    subscriptionId: string | null,
+    entries: FetchWorkspacesResponseEntry[],
+  ): void {
+    if (!subscriptionId || this.workspaceUpdatesSubscription?.subscriptionId !== subscriptionId) {
+      return;
+    }
+    this.flushBootstrappedWorkspaceUpdates({
+      snapshotLatestActivityByWorkspaceId: buildSnapshotLatestActivityByWorkspaceId(entries),
+    });
+    if (!this.xcodexConnectorOnly) {
+      void this.reconcileAndEmitWorkspaceUpdates();
+    }
+  }
+
+  private emitFetchWorkspacesRequestError(
+    request: FetchWorkspacesRequestMessage,
+    subscriptionId: string | null,
+    error: unknown,
+  ): void {
+    if (subscriptionId && this.workspaceUpdatesSubscription?.subscriptionId === subscriptionId) {
+      this.workspaceUpdatesSubscription = null;
+    }
+    const code = error instanceof SessionRequestError ? error.code : "fetch_workspaces_failed";
+    const message = error instanceof Error ? error.message : "Failed to fetch workspaces";
+    this.sessionLogger.error({ err: error }, "Failed to handle fetch_workspaces_request");
+    this.emit({
+      type: "rpc_error",
+      payload: {
+        requestId: request.requestId,
+        requestType: request.type,
+        error: message,
+        code,
+      },
+    });
+  }
+
   private async handleFetchWorkspacesRequest(
-    request: Extract<SessionInboundMessage, { type: "fetch_workspaces_request" }>,
+    request: FetchWorkspacesRequestMessage,
   ): Promise<void> {
     const requestedSubscriptionId = request.subscribe?.subscriptionId?.trim();
     const subscriptionId = resolveSubscriptionId(request.subscribe, requestedSubscriptionId);
 
     try {
-      this.sessionLogger.debug(
-        {
-          requestId: request.requestId,
-          subscribeRequested: Boolean(request.subscribe),
-          filter: request.filter ?? null,
-          sort: request.sort ?? null,
-          page: request.page ?? null,
-        },
-        "fetch_workspaces_request_received",
-      );
-      if (subscriptionId) {
-        this.workspaceUpdatesSubscription = {
-          subscriptionId,
-          filter: request.filter,
-          isBootstrapping: true,
-          pendingUpdatesByWorkspaceId: new Map(),
-          lastEmittedByWorkspaceId: new Map(),
-        };
-      }
-
-      const payload = await this.listFetchWorkspacesEntries(request);
-      this.syncWorkspaceGitObservers(payload.entries);
-      this.sessionLogger.debug(
-        {
-          requestId: request.requestId,
-          subscriptionId,
-          pageInfo: payload.pageInfo,
-          payload: summarizeFetchWorkspacesEntries(payload.entries),
-        },
-        "fetch_workspaces_response_ready",
-      );
-      const snapshotLatestActivityByWorkspaceId = new Map<string, number>();
-      for (const entry of payload.entries) {
-        const parsedLatestActivity = entry.activityAt
-          ? Date.parse(entry.activityAt)
-          : Number.NEGATIVE_INFINITY;
-        if (!Number.isNaN(parsedLatestActivity)) {
-          snapshotLatestActivityByWorkspaceId.set(entry.id, parsedLatestActivity);
-        }
-      }
-
-      this.emit({
-        type: "fetch_workspaces_response",
-        payload: {
-          requestId: request.requestId,
-          ...(subscriptionId ? { subscriptionId } : {}),
-          ...payload,
-        },
-      });
-
-      if (subscriptionId && this.workspaceUpdatesSubscription?.subscriptionId === subscriptionId) {
-        this.flushBootstrappedWorkspaceUpdates({ snapshotLatestActivityByWorkspaceId });
-        void this.reconcileAndEmitWorkspaceUpdates();
-      }
+      this.logFetchWorkspacesRequest(request, subscriptionId);
+      this.beginWorkspaceUpdatesSubscription(subscriptionId, request);
+      const payload = await this.listFetchWorkspacesPayload(request);
+      this.emitFetchWorkspacesResponse(request, subscriptionId, payload);
+      this.finishWorkspaceUpdatesBootstrap(subscriptionId, payload.entries);
     } catch (error) {
-      if (subscriptionId && this.workspaceUpdatesSubscription?.subscriptionId === subscriptionId) {
-        this.workspaceUpdatesSubscription = null;
-      }
-      const code = error instanceof SessionRequestError ? error.code : "fetch_workspaces_failed";
-      const message = error instanceof Error ? error.message : "Failed to fetch workspaces";
-      this.sessionLogger.error({ err: error }, "Failed to handle fetch_workspaces_request");
-      this.emit({
-        type: "rpc_error",
-        payload: {
-          requestId: request.requestId,
-          requestType: request.type,
-          error: message,
-          code,
+      this.emitFetchWorkspacesRequestError(request, subscriptionId, error);
+    }
+  }
+
+  private async listXcodexFetchWorkspacesEntries(
+    request: Extract<SessionInboundMessage, { type: "fetch_workspaces_request" }>,
+  ): Promise<{
+    entries: FetchWorkspacesResponseEntry[];
+    pageInfo: FetchWorkspacesResponsePageInfo;
+  }> {
+    if (!this.xcodexBridge) {
+      return {
+        entries: [],
+        pageInfo: {
+          nextCursor: null,
+          prevCursor: request.page?.cursor ?? null,
+          hasMore: false,
         },
-      });
+      };
+    }
+    try {
+      return await this.xcodexBridge.listWorkspacePayloads(request);
+    } catch (error) {
+      if (error instanceof CursorError) {
+        throw new SessionRequestError("invalid_cursor", error.message);
+      }
+      throw error;
     }
   }
 
@@ -7241,7 +7701,9 @@ export class Session {
       return;
     }
 
-    const project = await this.buildProjectPlacementForCwd(agent.cwd);
+    const project = this.xcodexBridge?.isVirtualAgentId(agent.id)
+      ? this.xcodexBridge.buildProjectPlacement(agent)
+      : await this.buildProjectPlacementForCwd(agent.cwd);
     this.emit({
       type: "fetch_agent_response",
       payload: { requestId, agent, project, error: null },
@@ -7314,25 +7776,140 @@ export class Session {
     };
   }
 
-  private async handleFetchAgentTimelineRequest(
-    msg: Extract<SessionInboundMessage, { type: "fetch_agent_timeline_request" }>,
-  ): Promise<void> {
-    const direction: AgentTimelineFetchDirection = msg.direction ?? (msg.cursor ? "after" : "tail");
-    const projection: TimelineProjectionMode = msg.projection ?? "projected";
-    const requestedLimit = msg.limit;
-    const limit = requestedLimit ?? (direction === "after" ? 0 : undefined);
-    const shouldLimitByProjectedWindow =
-      projection === "canonical" &&
-      direction === "tail" &&
-      typeof requestedLimit === "number" &&
-      requestedLimit > 0;
-    const cursor: AgentTimelineCursor | undefined = msg.cursor
-      ? {
-          epoch: msg.cursor.epoch,
-          seq: msg.cursor.seq,
-        }
-      : undefined;
+  private emitAgentTimelineErrorResponse(
+    msg: FetchAgentTimelineRequestMessage,
+    options: AgentTimelineFetchOptions,
+    error: unknown,
+  ): void {
+    this.emit({
+      type: "fetch_agent_timeline_response",
+      payload: {
+        requestId: msg.requestId,
+        agentId: msg.agentId,
+        agent: null,
+        direction: options.direction,
+        projection: options.projection,
+        epoch: "",
+        reset: false,
+        staleCursor: false,
+        gap: false,
+        window: { minSeq: 0, maxSeq: 0, nextSeq: 0 },
+        startCursor: null,
+        endCursor: null,
+        hasOlder: false,
+        hasNewer: false,
+        entries: [],
+        error: error instanceof Error ? error.message : String(error),
+      },
+    });
+  }
 
+  private async handleXcodexFetchAgentTimelineRequest(
+    msg: FetchAgentTimelineRequestMessage,
+    options: AgentTimelineFetchOptions,
+  ): Promise<void> {
+    try {
+      const timeline = await this.xcodexBridge?.fetchTimeline({
+        agentId: msg.agentId,
+        direction: options.direction,
+        projection: options.projection,
+        cursor: options.cursor?.seq,
+        limit: options.limit,
+      });
+      if (!timeline) {
+        throw new Error(`Agent not found: ${msg.agentId}`);
+      }
+      const firstEntry = timeline.entries[0];
+      const lastEntry = timeline.entries[timeline.entries.length - 1];
+      this.emit({
+        type: "fetch_agent_timeline_response",
+        payload: {
+          requestId: msg.requestId,
+          agentId: msg.agentId,
+          agent: timeline.agent,
+          direction: options.direction,
+          projection: options.projection,
+          epoch: timeline.epoch,
+          reset: false,
+          staleCursor: false,
+          gap: false,
+          window: timeline.window,
+          startCursor: firstEntry ? { epoch: timeline.epoch, seq: firstEntry.seqStart } : null,
+          endCursor: lastEntry ? { epoch: timeline.epoch, seq: lastEntry.seqEnd } : null,
+          hasOlder: firstEntry ? firstEntry.seqStart > timeline.window.minSeq : false,
+          hasNewer: lastEntry ? lastEntry.seqEnd < timeline.window.maxSeq : false,
+          entries: timeline.entries,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.sessionLogger.error(
+        { err: error, agentId: msg.agentId },
+        "Failed to fetch xCodex virtual agent timeline",
+      );
+      this.emitAgentTimelineErrorResponse(msg, options, error);
+    }
+  }
+
+  private loadLocalAgentTimelineWindow(
+    msg: FetchAgentTimelineRequestMessage,
+    options: AgentTimelineFetchOptions,
+  ): {
+    timeline: ReturnType<AgentManager["fetchTimeline"]>;
+    entries: ReturnType<typeof projectTimelineRows>;
+    hasOlder: boolean;
+    hasNewer: boolean;
+    startCursor: { epoch: string; seq: number } | null;
+    endCursor: { epoch: string; seq: number } | null;
+  } {
+    let timeline = this.agentManager.fetchTimeline(msg.agentId, {
+      direction: options.direction,
+      cursor: options.cursor,
+      limit:
+        options.shouldLimitByProjectedWindow && typeof options.requestedLimit === "number"
+          ? Math.max(1, Math.floor(options.requestedLimit))
+          : options.limit,
+    });
+    let hasOlder = timeline.hasOlder;
+    let hasNewer = timeline.hasNewer;
+    let startCursor: { epoch: string; seq: number } | null = null;
+    let endCursor: { epoch: string; seq: number } | null = null;
+    let entries: ReturnType<typeof projectTimelineRows>;
+
+    if (options.shouldLimitByProjectedWindow && typeof options.requestedLimit === "number") {
+      const projectedResult = this.loadProjectedTimelineWindow({
+        agentId: msg.agentId,
+        direction: options.direction,
+        cursor: options.cursor,
+        requestedLimit: options.requestedLimit,
+        timeline,
+      });
+      timeline = projectedResult.timeline;
+      entries = projectTimelineRows({
+        rows: projectedResult.selectedRows,
+        mode: options.projection,
+      });
+      if (projectedResult.minSeq !== null && projectedResult.maxSeq !== null) {
+        startCursor = { epoch: timeline.epoch, seq: projectedResult.minSeq };
+        endCursor = { epoch: timeline.epoch, seq: projectedResult.maxSeq };
+        hasOlder = projectedResult.minSeq > timeline.window.minSeq;
+        hasNewer = false;
+      }
+    } else {
+      const firstRow = timeline.rows[0];
+      const lastRow = timeline.rows[timeline.rows.length - 1];
+      startCursor = firstRow ? { epoch: timeline.epoch, seq: firstRow.seq } : null;
+      endCursor = lastRow ? { epoch: timeline.epoch, seq: lastRow.seq } : null;
+      entries = projectTimelineRows({ rows: timeline.rows, mode: options.projection });
+    }
+
+    return { timeline, entries, hasOlder, hasNewer, startCursor, endCursor };
+  }
+
+  private async handleLocalFetchAgentTimelineRequest(
+    msg: FetchAgentTimelineRequestMessage,
+    options: AgentTimelineFetchOptions,
+  ): Promise<void> {
     try {
       const snapshot = await ensureAgentLoaded(msg.agentId, {
         agentManager: this.agentManager,
@@ -7340,44 +7917,7 @@ export class Session {
         logger: this.sessionLogger,
       });
       const agentPayload = await this.buildAgentPayload(snapshot);
-
-      let timeline = this.agentManager.fetchTimeline(msg.agentId, {
-        direction,
-        cursor,
-        limit:
-          shouldLimitByProjectedWindow && typeof requestedLimit === "number"
-            ? Math.max(1, Math.floor(requestedLimit))
-            : limit,
-      });
-      let hasOlder = timeline.hasOlder;
-      let hasNewer = timeline.hasNewer;
-      let startCursor: { epoch: string; seq: number } | null = null;
-      let endCursor: { epoch: string; seq: number } | null = null;
-      let entries: ReturnType<typeof projectTimelineRows>;
-
-      if (shouldLimitByProjectedWindow) {
-        const projectedResult = this.loadProjectedTimelineWindow({
-          agentId: msg.agentId,
-          direction,
-          cursor,
-          requestedLimit,
-          timeline,
-        });
-        timeline = projectedResult.timeline;
-        entries = projectTimelineRows({ rows: projectedResult.selectedRows, mode: projection });
-        if (projectedResult.minSeq !== null && projectedResult.maxSeq !== null) {
-          startCursor = { epoch: timeline.epoch, seq: projectedResult.minSeq };
-          endCursor = { epoch: timeline.epoch, seq: projectedResult.maxSeq };
-          hasOlder = projectedResult.minSeq > timeline.window.minSeq;
-          hasNewer = false;
-        }
-      } else {
-        const firstRow = timeline.rows[0];
-        const lastRow = timeline.rows[timeline.rows.length - 1];
-        startCursor = firstRow ? { epoch: timeline.epoch, seq: firstRow.seq } : null;
-        endCursor = lastRow ? { epoch: timeline.epoch, seq: lastRow.seq } : null;
-        entries = projectTimelineRows({ rows: timeline.rows, mode: projection });
-      }
+      const timelineWindow = this.loadLocalAgentTimelineWindow(msg, options);
 
       this.emit({
         type: "fetch_agent_timeline_response",
@@ -7385,18 +7925,18 @@ export class Session {
           requestId: msg.requestId,
           agentId: msg.agentId,
           agent: agentPayload,
-          direction,
-          projection,
-          epoch: timeline.epoch,
-          reset: timeline.reset,
-          staleCursor: timeline.staleCursor,
-          gap: timeline.gap,
-          window: timeline.window,
-          startCursor,
-          endCursor,
-          hasOlder,
-          hasNewer,
-          entries: entries.map((entry) => ({
+          direction: options.direction,
+          projection: options.projection,
+          epoch: timelineWindow.timeline.epoch,
+          reset: timelineWindow.timeline.reset,
+          staleCursor: timelineWindow.timeline.staleCursor,
+          gap: timelineWindow.timeline.gap,
+          window: timelineWindow.timeline.window,
+          startCursor: timelineWindow.startCursor,
+          endCursor: timelineWindow.endCursor,
+          hasOlder: timelineWindow.hasOlder,
+          hasNewer: timelineWindow.hasNewer,
+          entries: timelineWindow.entries.map((entry) => ({
             provider: snapshot.provider,
             item: entry.item,
             timestamp: entry.timestamp,
@@ -7415,28 +7955,27 @@ export class Session {
         { err: error, agentId: msg.agentId },
         "Failed to handle fetch_agent_timeline_request",
       );
-      this.emit({
-        type: "fetch_agent_timeline_response",
-        payload: {
-          requestId: msg.requestId,
-          agentId: msg.agentId,
-          agent: null,
-          direction,
-          projection,
-          epoch: "",
-          reset: false,
-          staleCursor: false,
-          gap: false,
-          window: { minSeq: 0, maxSeq: 0, nextSeq: 0 },
-          startCursor: null,
-          endCursor: null,
-          hasOlder: false,
-          hasNewer: false,
-          entries: [],
-          error: error instanceof Error ? error.message : String(error),
-        },
-      });
+      this.emitAgentTimelineErrorResponse(msg, options, error);
     }
+  }
+
+  private async handleFetchAgentTimelineRequest(
+    msg: FetchAgentTimelineRequestMessage,
+  ): Promise<void> {
+    const options = resolveAgentTimelineFetchOptions(msg);
+    if (this.xcodexBridge?.isVirtualAgentId(msg.agentId)) {
+      await this.handleXcodexFetchAgentTimelineRequest(msg, options);
+      return;
+    }
+    if (this.xcodexConnectorOnly) {
+      this.emitAgentTimelineErrorResponse(
+        msg,
+        options,
+        new Error(`Agent not found: ${msg.agentId}`),
+      );
+      return;
+    }
+    await this.handleLocalFetchAgentTimelineRequest(msg, options);
   }
 
   private async handleSendAgentMessageRequest(
@@ -7458,6 +7997,38 @@ export class Session {
 
     try {
       const agentId = resolved.agentId;
+
+      if (this.xcodexBridge?.isVirtualAgentId(agentId)) {
+        try {
+          const result = await this.xcodexBridge.sendMessage({
+            agentId,
+            text: msg.text,
+            messageId: msg.messageId,
+          });
+          this.emit({
+            type: "send_agent_message_response",
+            payload: {
+              requestId: msg.requestId,
+              agentId,
+              accepted: result.accepted,
+              error: result.accepted ? null : (result.reason ?? "xCodex turn was not accepted"),
+            },
+          });
+        } catch (error) {
+          const message = errorToFriendlyMessage(error);
+          this.handleAgentRunError(agentId, error, "Failed to send xCodex agent message");
+          this.emit({
+            type: "send_agent_message_response",
+            payload: {
+              requestId: msg.requestId,
+              agentId,
+              accepted: false,
+              error: message,
+            },
+          });
+        }
+        return;
+      }
 
       const prompt = this.buildAgentPrompt(msg.text, msg.images, msg.attachments);
       this.sessionLogger.trace(
@@ -8329,6 +8900,10 @@ export class Session {
       this.unsubscribeAgentEvents();
       this.unsubscribeAgentEvents = null;
     }
+    if (this.unsubscribeXcodexEvents) {
+      this.unsubscribeXcodexEvents();
+      this.unsubscribeXcodexEvents = null;
+    }
     if (this.unsubscribeProviderSnapshotEvents) {
       this.unsubscribeProviderSnapshotEvents();
       this.unsubscribeProviderSnapshotEvents = null;
@@ -8392,11 +8967,21 @@ export class Session {
     });
   }
 
+  private requireChatService(): FileBackedChatService {
+    if (!this.chatService) {
+      throw new ChatServiceError(
+        "chat_unavailable",
+        "Chat is unavailable in xCodex connector mode.",
+      );
+    }
+    return this.chatService;
+  }
+
   private async handleChatCreateRequest(
     request: Extract<SessionInboundMessage, { type: "chat/create" }>,
   ): Promise<void> {
     try {
-      const room = await this.chatService.createRoom({
+      const room = await this.requireChatService().createRoom({
         name: request.name,
         purpose: request.purpose,
       });
@@ -8417,7 +9002,7 @@ export class Session {
     request: Extract<SessionInboundMessage, { type: "chat/list" }>,
   ): Promise<void> {
     try {
-      const rooms = await this.chatService.listRooms();
+      const rooms = await this.requireChatService().listRooms();
       this.emit({
         type: "chat/list/response",
         payload: {
@@ -8435,7 +9020,7 @@ export class Session {
     request: Extract<SessionInboundMessage, { type: "chat/inspect" }>,
   ): Promise<void> {
     try {
-      const result = await this.chatService.inspectRoom({
+      const result = await this.requireChatService().inspectRoom({
         room: request.room,
       });
       this.emit({
@@ -8455,7 +9040,7 @@ export class Session {
     request: Extract<SessionInboundMessage, { type: "chat/delete" }>,
   ): Promise<void> {
     try {
-      const result = await this.chatService.deleteRoom({
+      const result = await this.requireChatService().deleteRoom({
         room: request.room,
       });
       this.emit({
@@ -8475,6 +9060,7 @@ export class Session {
     request: Extract<SessionInboundMessage, { type: "chat/post" }>,
   ): Promise<void> {
     try {
+      const chatService = this.requireChatService();
       const authorAgentId = request.authorAgentId?.trim() || this.clientId;
       const mentionAgentIds = parseMentionAgentIds(request.body);
       const storedAgents = await this.agentStorage.list();
@@ -8484,13 +9070,12 @@ export class Session {
         mentionAgentIds,
         storedAgents,
         liveAgents,
-        listRoomPosterAgentIds: () =>
-          this.chatService.listRoomPosterAgentIds({ room: request.room }),
+        listRoomPosterAgentIds: () => chatService.listRoomPosterAgentIds({ room: request.room }),
       });
       if (!fanout.ok) {
         throw new ChatServiceError("chat_mention_fanout_limit_exceeded", fanout.error);
       }
-      const message = await this.chatService.dispatchMessage({
+      const message = await chatService.dispatchMessage({
         room: request.room,
         authorAgentId,
         body: request.body,
@@ -8535,7 +9120,7 @@ export class Session {
     request: Extract<SessionInboundMessage, { type: "chat/read" }>,
   ): Promise<void> {
     try {
-      const messages = await this.chatService.readMessages({
+      const messages = await this.requireChatService().readMessages({
         room: request.room,
         limit: request.limit,
         since: request.since,
@@ -8558,7 +9143,7 @@ export class Session {
     request: Extract<SessionInboundMessage, { type: "chat/wait" }>,
   ): Promise<void> {
     try {
-      const messages = await this.chatService.waitForMessages({
+      const messages = await this.requireChatService().waitForMessages({
         room: request.room,
         afterMessageId: request.afterMessageId,
         timeoutMs: request.timeoutMs,
@@ -8618,6 +9203,13 @@ export class Session {
     });
   }
 
+  private requireScheduleService(): ScheduleService {
+    if (!this.scheduleService) {
+      throw new Error("Schedule service is unavailable in xCodex connector mode.");
+    }
+    return this.scheduleService;
+  }
+
   private async handleScheduleCreateRequest(
     request: Extract<SessionInboundMessage, { type: "schedule/create" }>,
   ): Promise<void> {
@@ -8626,7 +9218,7 @@ export class Session {
         request.target.type === "self"
           ? { type: "agent" as const, agentId: request.target.agentId }
           : request.target;
-      const schedule = await this.scheduleService.create({
+      const schedule = await this.requireScheduleService().create({
         prompt: request.prompt,
         name: request.name,
         cadence: request.cadence,
@@ -8652,7 +9244,7 @@ export class Session {
     request: Extract<SessionInboundMessage, { type: "schedule/list" }>,
   ): Promise<void> {
     try {
-      const schedules = await this.scheduleService.list();
+      const schedules = await this.requireScheduleService().list();
       this.emit({
         type: "schedule/list/response",
         payload: {
@@ -8670,7 +9262,7 @@ export class Session {
     request: Extract<SessionInboundMessage, { type: "schedule/inspect" }>,
   ): Promise<void> {
     try {
-      const schedule = await this.scheduleService.inspect(request.scheduleId);
+      const schedule = await this.requireScheduleService().inspect(request.scheduleId);
       this.emit({
         type: "schedule/inspect/response",
         payload: {
@@ -8688,7 +9280,7 @@ export class Session {
     request: Extract<SessionInboundMessage, { type: "schedule/logs" }>,
   ): Promise<void> {
     try {
-      const runs = await this.scheduleService.logs(request.scheduleId);
+      const runs = await this.requireScheduleService().logs(request.scheduleId);
       this.emit({
         type: "schedule/logs/response",
         payload: {
@@ -8706,7 +9298,7 @@ export class Session {
     request: Extract<SessionInboundMessage, { type: "schedule/pause" }>,
   ): Promise<void> {
     try {
-      const schedule = await this.scheduleService.pause(request.scheduleId);
+      const schedule = await this.requireScheduleService().pause(request.scheduleId);
       this.emit({
         type: "schedule/pause/response",
         payload: {
@@ -8724,7 +9316,7 @@ export class Session {
     request: Extract<SessionInboundMessage, { type: "schedule/resume" }>,
   ): Promise<void> {
     try {
-      const schedule = await this.scheduleService.resume(request.scheduleId);
+      const schedule = await this.requireScheduleService().resume(request.scheduleId);
       this.emit({
         type: "schedule/resume/response",
         payload: {
@@ -8742,7 +9334,7 @@ export class Session {
     request: Extract<SessionInboundMessage, { type: "schedule/delete" }>,
   ): Promise<void> {
     try {
-      await this.scheduleService.delete(request.scheduleId);
+      await this.requireScheduleService().delete(request.scheduleId);
       this.emit({
         type: "schedule/delete/response",
         payload: {
@@ -8760,7 +9352,7 @@ export class Session {
     request: Extract<SessionInboundMessage, { type: "schedule/run-once" }>,
   ): Promise<void> {
     try {
-      const schedule = await this.scheduleService.runOnce(request.scheduleId);
+      const schedule = await this.requireScheduleService().runOnce(request.scheduleId);
       this.emit({
         type: "schedule/run-once/response",
         payload: {
@@ -8778,7 +9370,7 @@ export class Session {
     request: Extract<SessionInboundMessage, { type: "schedule/update" }>,
   ): Promise<void> {
     try {
-      const schedule = await this.scheduleService.update({
+      const schedule = await this.requireScheduleService().update({
         id: request.scheduleId,
         ...(request.name !== undefined ? { name: request.name } : {}),
         ...(request.prompt !== undefined ? { prompt: request.prompt } : {}),
@@ -8822,11 +9414,18 @@ export class Session {
     });
   }
 
+  private requireLoopService(): LoopService {
+    if (!this.loopService) {
+      throw new Error("Loop service is unavailable in xCodex connector mode.");
+    }
+    return this.loopService;
+  }
+
   private async handleLoopRunRequest(
     request: Extract<SessionInboundMessage, { type: "loop/run" }>,
   ): Promise<void> {
     try {
-      const loop = await this.loopService.runLoop({
+      const loop = await this.requireLoopService().runLoop({
         prompt: request.prompt,
         cwd: request.cwd,
         provider: request.provider,
@@ -8862,7 +9461,7 @@ export class Session {
     request: Extract<SessionInboundMessage, { type: "loop/list" }>,
   ): Promise<void> {
     try {
-      const loops = await this.loopService.listLoops();
+      const loops = await this.requireLoopService().listLoops();
       this.emit({
         type: "loop/list/response",
         payload: {
@@ -8880,7 +9479,7 @@ export class Session {
     request: Extract<SessionInboundMessage, { type: "loop/inspect" }>,
   ): Promise<void> {
     try {
-      const loop = await this.loopService.inspectLoop(request.id);
+      const loop = await this.requireLoopService().inspectLoop(request.id);
       this.emit({
         type: "loop/inspect/response",
         payload: {
@@ -8898,7 +9497,7 @@ export class Session {
     request: Extract<SessionInboundMessage, { type: "loop/logs" }>,
   ): Promise<void> {
     try {
-      const result = await this.loopService.getLoopLogs(request.id, request.afterSeq ?? 0);
+      const result = await this.requireLoopService().getLoopLogs(request.id, request.afterSeq ?? 0);
       this.emit({
         type: "loop/logs/response",
         payload: {
@@ -8918,7 +9517,7 @@ export class Session {
     request: Extract<SessionInboundMessage, { type: "loop/stop" }>,
   ): Promise<void> {
     try {
-      const loop = await this.loopService.stopLoop(request.id);
+      const loop = await this.requireLoopService().stopLoop(request.id);
       this.emit({
         type: "loop/stop/response",
         payload: {

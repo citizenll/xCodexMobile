@@ -175,6 +175,56 @@ describe("projectTimelineRows", () => {
     expect(tool?.collapsed).toContain("tool_lifecycle");
   });
 
+  test("preserves known tool names and combines unknown input/output while collapsing lifecycle", () => {
+    const rows: AgentTimelineRow[] = [
+      {
+        seq: 1,
+        timestamp: "2026-02-13T00:00:00.000Z",
+        item: {
+          type: "tool_call",
+          callId: "call_1",
+          name: "shell_command",
+          status: "running",
+          error: null,
+          detail: {
+            type: "unknown",
+            input: { command: "git status" },
+            output: null,
+          },
+        },
+      },
+      {
+        seq: 2,
+        timestamp: "2026-02-13T00:00:00.100Z",
+        item: {
+          type: "tool_call",
+          callId: "call_1",
+          name: "tool",
+          status: "completed",
+          error: null,
+          detail: {
+            type: "unknown",
+            input: null,
+            output: "clean",
+          },
+        },
+      },
+    ];
+
+    const projected = projectTimelineRows({ rows, mode: "projected" });
+    const tool = projected[0]?.item;
+
+    expect(tool?.type).toBe("tool_call");
+    if (tool?.type === "tool_call") {
+      expect(tool.name).toBe("shell_command");
+      expect(tool.detail).toEqual({
+        type: "unknown",
+        input: { command: "git status" },
+        output: "clean",
+      });
+    }
+  });
+
   test("returns canonical rows unchanged in canonical mode", () => {
     const rows: AgentTimelineRow[] = [
       {

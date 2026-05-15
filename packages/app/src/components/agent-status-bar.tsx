@@ -101,6 +101,7 @@ interface ControlledAgentStatusBarProps {
   onSetFeature?: (featureId: string, value: unknown) => void;
   onDropdownClose?: () => void;
   onModelSelectorOpen?: () => void;
+  modelDisplayOverride?: string;
 }
 
 export interface DraftAgentStatusBarProps {
@@ -219,6 +220,10 @@ function resolveHasAnyControl({
     Boolean(thinkingOptions?.length) ||
     Boolean(features?.length)
   );
+}
+
+function isReadOnlyXcodexAgent(agent: AgentStatusBarSlice): boolean {
+  return agent?.provider === "xcodex";
 }
 
 function toComboboxOptions(options: StatusOption[] | undefined): ComboboxOption[] {
@@ -490,6 +495,7 @@ function ControlledStatusBar({
   onSetFeature,
   onDropdownClose,
   onModelSelectorOpen,
+  modelDisplayOverride,
 }: ControlledAgentStatusBarProps) {
   const { theme } = useUnistyles();
   const [prefsOpen, setPrefsOpen] = useState(false);
@@ -511,7 +517,8 @@ function ControlledStatusBar({
 
   const displayProvider = findOptionLabel(providerOptions, selectedProviderId, "Provider");
   const displayMode = findOptionLabel(modeOptions, selectedModeId, "Default");
-  const displayModel = resolveDisplayModel(isModelLoading, modelOptions, selectedModelId);
+  const displayModel =
+    modelDisplayOverride ?? resolveDisplayModel(isModelLoading, modelOptions, selectedModelId);
   const displayThinking = findOptionLabel(
     thinkingOptions,
     selectedThinkingOptionId,
@@ -526,13 +533,14 @@ function ControlledStatusBar({
   );
   const ProviderIcon = resolveProviderIcon(provider);
 
-  const hasAnyControl = resolveHasAnyControl({
-    providerOptions,
-    modeOptions,
-    canSelectModel,
-    thinkingOptions,
-    features,
-  });
+  const hasAnyControl =
+    resolveHasAnyControl({
+      providerOptions,
+      modeOptions,
+      canSelectModel,
+      thinkingOptions,
+      features,
+    }) || Boolean(modelDisplayOverride);
 
   const modelDisabled = disabled;
 
@@ -1628,6 +1636,138 @@ function ModeMenuItem({
 
 const EMPTY_MODES: AgentMode[] = [];
 
+function resolveFallbackModeOptions({
+  readOnlyXcodex,
+  modeOptions,
+  currentModeId,
+  displayMode,
+}: {
+  readOnlyXcodex: boolean;
+  modeOptions: StatusOption[];
+  currentModeId: string | null | undefined;
+  displayMode: string;
+}): StatusOption[] {
+  if (readOnlyXcodex) {
+    return [];
+  }
+  return modeOptions.length > 0 ? modeOptions : [{ id: currentModeId ?? "", label: displayMode }];
+}
+
+function resolveOptionalThinkingOptions(
+  thinkingOptions: StatusOption[],
+): StatusOption[] | undefined {
+  return thinkingOptions.length > 1 ? thinkingOptions : undefined;
+}
+
+function resolveModelDisplayOverride(
+  readOnlyXcodex: boolean,
+  agent: AgentStatusBarSlice,
+): string | undefined {
+  return readOnlyXcodex ? (agent?.runtimeModelId ?? agent?.model ?? "xCodex") : undefined;
+}
+
+function resolveModelLoadingState(
+  readOnlyXcodex: boolean,
+  snapshotIsLoading: boolean,
+  selectedProviderIsLoading: boolean,
+): boolean {
+  return readOnlyXcodex ? false : snapshotIsLoading || selectedProviderIsLoading;
+}
+
+function useAgentStatusBarDerivedState({
+  serverId,
+  agent,
+  availableModes,
+  preferences,
+}: {
+  serverId: string;
+  agent: AgentStatusBarSlice;
+  availableModes: AgentMode[];
+  preferences: ReturnType<typeof useFormPreferences>["preferences"];
+}) {
+  const {
+    entries: snapshotEntries,
+    isLoading: snapshotIsLoading,
+    refetchIfStale: refetchSnapshotIfStale,
+  } = useProvidersSnapshot(serverId);
+
+  const snapshotSelectedEntry = useMemo(
+    () => resolveSnapshotSelectedEntry(snapshotEntries, agent?.provider),
+    [snapshotEntries, agent?.provider],
+  );
+  const models = snapshotSelectedEntry?.models ?? null;
+  const selectedProviderIsLoading = snapshotSelectedEntry?.status === "loading";
+  const displayMode = resolveAgentDisplayMode(availableModes, agent?.currentModeId);
+  const modelSelection = resolveAgentModelSelection({
+    models,
+    runtimeModelId: agent?.runtimeModelId,
+    configuredModelId: agent?.model,
+    explicitThinkingOptionId: agent?.thinkingOptionId,
+  });
+  const readOnlyXcodex = isReadOnlyXcodexAgent(agent);
+
+  const agentProviderDefinitions = useMemo(
+    () => buildAgentProviderDefinitions(agent?.provider, snapshotEntries),
+    [agent?.provider, snapshotEntries],
+  );
+  const agentProviderModels = useMemo(
+    () => buildAgentProviderModels(agent?.provider, models),
+    [agent?.provider, models],
+  );
+  const modeOptions = useMemo<StatusOption[]>(
+    () => availableModes.map((mode) => ({ id: mode.id, label: mode.label })),
+    [availableModes],
+  );
+  const modelOptions = useMemo<StatusOption[]>(
+    () => (models ?? []).map((model) => ({ id: model.id, label: model.label })),
+    [models],
+  );
+  const favoriteKeys = useMemo(
+    () =>
+      new Set(
+        (preferences.favoriteModels ?? []).map((favorite) => buildFavoriteModelKey(favorite)),
+      ),
+    [preferences.favoriteModels],
+  );
+  const thinkingOptions = useMemo<StatusOption[]>(
+    () =>
+      (modelSelection.thinkingOptions ?? []).map((option) => ({
+        id: option.id,
+        label: option.label,
+      })),
+    [modelSelection.thinkingOptions],
+  );
+  const fallbackModeOptions = useMemo(
+    () =>
+      resolveFallbackModeOptions({
+        readOnlyXcodex,
+        modeOptions,
+        currentModeId: agent?.currentModeId,
+        displayMode,
+      }),
+    [agent?.currentModeId, displayMode, modeOptions, readOnlyXcodex],
+  );
+
+  return {
+    agentProviderDefinitions,
+    agentProviderModels,
+    activeModelId: modelSelection.activeModelId,
+    fallbackModeOptions,
+    favoriteKeys,
+    isModelLoading: resolveModelLoadingState(
+      readOnlyXcodex,
+      snapshotIsLoading,
+      selectedProviderIsLoading,
+    ),
+    modelDisplayOverride: resolveModelDisplayOverride(readOnlyXcodex, agent),
+    modelOptions,
+    modelSelection,
+    readOnlyXcodex,
+    refetchSnapshotIfStale,
+    thinkingOptions,
+  };
+}
+
 export const AgentStatusBar = memo(function AgentStatusBar({
   agentId,
   serverId,
@@ -1644,67 +1784,13 @@ export const AgentStatusBar = memo(function AgentStatusBar({
   );
   const client = useSessionStore((state) => state.sessions[serverId]?.client ?? null);
   const toast = useToast();
-
-  const {
-    entries: snapshotEntries,
-    isLoading: snapshotIsLoading,
-    refetchIfStale: refetchSnapshotIfStale,
-  } = useProvidersSnapshot(serverId);
-
-  const snapshotSelectedEntry = useMemo(
-    () => resolveSnapshotSelectedEntry(snapshotEntries, agent?.provider),
-    [snapshotEntries, agent?.provider],
-  );
-
-  const models = snapshotSelectedEntry?.models ?? null;
-  const selectedProviderIsLoading = snapshotSelectedEntry?.status === "loading";
-
-  const agentProviderDefinitions = useMemo(
-    () => buildAgentProviderDefinitions(agent?.provider, snapshotEntries),
-    [agent?.provider, snapshotEntries],
-  );
-
-  const agentProviderModels = useMemo(
-    () => buildAgentProviderModels(agent?.provider, models),
-    [agent?.provider, models],
-  );
-
-  const displayMode = resolveAgentDisplayMode(availableModes, agent?.currentModeId);
-
-  const modelSelection = resolveAgentModelSelection({
-    models,
-    runtimeModelId: agent?.runtimeModelId,
-    configuredModelId: agent?.model,
-    explicitThinkingOptionId: agent?.thinkingOptionId,
+  const derived = useAgentStatusBarDerivedState({
+    serverId,
+    agent,
+    availableModes,
+    preferences,
   });
-
-  const modeOptions = useMemo<StatusOption[]>(() => {
-    return availableModes.map((mode) => ({
-      id: mode.id,
-      label: mode.label,
-    }));
-  }, [availableModes]);
-
-  const modelOptions = useMemo<StatusOption[]>(() => {
-    return (models ?? []).map((model) => ({ id: model.id, label: model.label }));
-  }, [models]);
-  const favoriteKeys = useMemo(
-    () =>
-      new Set(
-        (preferences.favoriteModels ?? []).map((favorite) => buildFavoriteModelKey(favorite)),
-      ),
-    [preferences.favoriteModels],
-  );
-
-  const thinkingOptions = useMemo<StatusOption[]>(() => {
-    return (modelSelection.thinkingOptions ?? []).map((option) => ({
-      id: option.id,
-      label: option.label,
-    }));
-  }, [modelSelection.thinkingOptions]);
-
   const agentProvider = agent?.provider;
-  const activeModelId = modelSelection.activeModelId;
 
   const handleSelectMode = useCallback(
     (modeId: string) => {
@@ -1759,6 +1845,7 @@ export const AgentStatusBar = memo(function AgentStatusBar({
       if (!client || !agentProvider) {
         return;
       }
+      const activeModelId = derived.activeModelId ?? undefined;
       if (activeModelId) {
         void updatePreferences((current) =>
           mergeProviderPreferences({
@@ -1780,7 +1867,7 @@ export const AgentStatusBar = memo(function AgentStatusBar({
         toast.error(toErrorMessage(error));
       });
     },
-    [activeModelId, agentId, agentProvider, client, toast, updatePreferences],
+    [agentId, agentProvider, client, derived.activeModelId, toast, updatePreferences],
   );
 
   const handleSetFeature = useCallback(
@@ -1810,16 +1897,11 @@ export const AgentStatusBar = memo(function AgentStatusBar({
   );
 
   const handleModelSelectorOpen = useCallback(() => {
-    refetchSnapshotIfStale(agentProvider);
-  }, [agentProvider, refetchSnapshotIfStale]);
-
-  const fallbackModeOptions = useMemo<StatusOption[]>(
-    () =>
-      modeOptions.length > 0
-        ? modeOptions
-        : [{ id: agent?.currentModeId ?? "", label: displayMode }],
-    [agent?.currentModeId, displayMode, modeOptions],
-  );
+    if (derived.readOnlyXcodex) {
+      return;
+    }
+    derived.refetchSnapshotIfStale(agentProvider);
+  }, [agentProvider, derived]);
 
   if (!agent) {
     return null;
@@ -1828,23 +1910,24 @@ export const AgentStatusBar = memo(function AgentStatusBar({
   return (
     <ControlledStatusBar
       provider={agent.provider}
-      modeOptions={fallbackModeOptions}
+      modeOptions={derived.fallbackModeOptions}
       selectedModeId={agent.currentModeId ?? undefined}
-      providerDefinitions={agentProviderDefinitions}
-      allProviderModels={agentProviderModels}
-      onSelectMode={handleSelectMode}
-      modelOptions={modelOptions}
-      selectedModelId={modelSelection.activeModelId ?? undefined}
-      onSelectModel={handleSelectModel}
-      favoriteKeys={favoriteKeys}
+      providerDefinitions={derived.agentProviderDefinitions}
+      allProviderModels={derived.agentProviderModels}
+      onSelectMode={derived.readOnlyXcodex ? undefined : handleSelectMode}
+      modelOptions={derived.modelOptions}
+      selectedModelId={derived.modelSelection.activeModelId ?? undefined}
+      onSelectModel={derived.readOnlyXcodex ? undefined : handleSelectModel}
+      favoriteKeys={derived.favoriteKeys}
       onToggleFavoriteModel={handleToggleFavoriteModel}
-      thinkingOptions={thinkingOptions.length > 1 ? thinkingOptions : undefined}
-      selectedThinkingOptionId={modelSelection.selectedThinkingId ?? undefined}
+      thinkingOptions={resolveOptionalThinkingOptions(derived.thinkingOptions)}
+      selectedThinkingOptionId={derived.modelSelection.selectedThinkingId ?? undefined}
       onSelectThinkingOption={handleSelectThinkingOption}
       features={agent.features}
       onSetFeature={handleSetFeature}
-      isModelLoading={snapshotIsLoading || selectedProviderIsLoading}
+      isModelLoading={derived.isModelLoading}
       onModelSelectorOpen={handleModelSelectorOpen}
+      modelDisplayOverride={derived.modelDisplayOverride}
       onDropdownClose={onDropdownClose}
       disabled={!client}
     />

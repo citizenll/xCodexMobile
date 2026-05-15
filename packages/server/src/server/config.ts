@@ -5,8 +5,10 @@ import { z } from "zod";
 import type { PaseoDaemonConfig } from "./bootstrap.js";
 import {
   loadPersistedConfig,
+  DaemonConnectorModeSchema,
   LogFormatSchema,
   LogLevelSchema,
+  type DaemonConnectorMode,
   type PersistedConfig,
 } from "./persisted-config.js";
 import type { AgentProvider } from "./agent/agent-sdk-types.js";
@@ -48,12 +50,22 @@ function normalizeLogEnv(value: string | undefined): string | undefined {
   return value.trim().toLowerCase();
 }
 
+function parseConnectorModeEnv(value: string | undefined): DaemonConnectorMode | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const parsed = DaemonConnectorModeSchema.safeParse(value.trim().toLowerCase());
+  return parsed.success ? parsed.data : undefined;
+}
+
 export type CliConfigOverrides = Partial<{
   listen: string;
   relayEnabled: boolean;
   relayUseTls: boolean;
   mcpEnabled: boolean;
   mcpInjectIntoAgents: boolean;
+  agentRuntimeEnabled: boolean;
+  connectorMode: DaemonConnectorMode;
   hostnames: HostnamesConfig;
 }>;
 
@@ -237,8 +249,7 @@ function resolveAuthConfig(
     : undefined;
 }
 
-function resolveStaticLoadConfigSettings(
-  env: NodeJS.ProcessEnv,
+function resolveMcpLoadConfig(
   cli: CliConfigOverrides | undefined,
   persisted: ReturnType<typeof loadPersistedConfig>,
 ) {
@@ -246,13 +257,53 @@ function resolveStaticLoadConfigSettings(
     mcpEnabled: cli?.mcpEnabled ?? persisted.daemon?.mcp?.enabled ?? true,
     mcpInjectIntoAgents:
       cli?.mcpInjectIntoAgents ?? persisted.daemon?.mcp?.injectIntoAgents ?? false,
-    autoArchiveAfterMerge: persisted.daemon?.autoArchiveAfterMerge ?? false,
+  };
+}
+
+function resolveConnectorLoadConfig(
+  env: NodeJS.ProcessEnv,
+  cli: CliConfigOverrides | undefined,
+  persisted: ReturnType<typeof loadPersistedConfig>,
+) {
+  return {
+    connectorMode:
+      cli?.connectorMode ??
+      parseConnectorModeEnv(env.PASEO_CONNECTOR_MODE) ??
+      persisted.daemon?.connectorMode ??
+      "xcodex",
+    agentRuntimeRequested:
+      cli?.agentRuntimeEnabled ??
+      parseBooleanEnv(env.PASEO_AGENT_RUNTIME_ENABLED) ??
+      persisted.daemon?.agentRuntime?.enabled ??
+      false,
+  };
+}
+
+function resolveHostLoadConfig(
+  env: NodeJS.ProcessEnv,
+  cli: CliConfigOverrides | undefined,
+  persisted: ReturnType<typeof loadPersistedConfig>,
+) {
+  return {
     hostnames: mergeHostnames([
       persisted.daemon?.hostnames,
       parseHostnamesEnv(env.PASEO_HOSTNAMES ?? env.PASEO_ALLOWED_HOSTS),
       cli?.hostnames,
     ]),
     appBaseUrl: env.PASEO_APP_BASE_URL ?? persisted.app?.baseUrl ?? DEFAULT_APP_BASE_URL,
+  };
+}
+
+function resolveStaticLoadConfigSettings(
+  env: NodeJS.ProcessEnv,
+  cli: CliConfigOverrides | undefined,
+  persisted: ReturnType<typeof loadPersistedConfig>,
+) {
+  return {
+    ...resolveMcpLoadConfig(cli, persisted),
+    ...resolveConnectorLoadConfig(env, cli, persisted),
+    autoArchiveAfterMerge: persisted.daemon?.autoArchiveAfterMerge ?? false,
+    ...resolveHostLoadConfig(env, cli, persisted),
   };
 }
 
@@ -267,8 +318,16 @@ export function loadConfig(
   const persisted = loadPersistedConfig(paseoHome);
 
   const listen = resolveListenAddress(env, options?.cli, persisted);
-  const { mcpEnabled, mcpInjectIntoAgents, autoArchiveAfterMerge, hostnames, appBaseUrl } =
-    resolveStaticLoadConfigSettings(env, options?.cli, persisted);
+  const {
+    mcpEnabled,
+    mcpInjectIntoAgents,
+    connectorMode,
+    agentRuntimeRequested,
+    autoArchiveAfterMerge,
+    hostnames,
+    appBaseUrl,
+  } = resolveStaticLoadConfigSettings(env, options?.cli, persisted);
+  const agentRuntimeEnabled = connectorMode === "paseo" && agentRuntimeRequested === true;
 
   const relay = resolveRelayConfig({
     env,
@@ -295,6 +354,8 @@ export function loadConfig(
     hostnames,
     mcpEnabled,
     mcpInjectIntoAgents,
+    connectorMode,
+    agentRuntimeEnabled,
     autoArchiveAfterMerge,
     mcpDebug: env.MCP_DEBUG === "1",
     isDev: resolvePaseoNodeEnv(env) === "development",

@@ -178,8 +178,8 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
     [router],
   );
 
-  const handleOpenPaseoSite = useCallback(() => {
-    void openExternalUrl("https://paseo.sh");
+  const handleOpenXcodexSite = useCallback(() => {
+    void openExternalUrl("https://github.com/citizenl/xcodex-mobile");
   }, []);
 
   const handleOpenSettings = useCallback(() => {
@@ -264,11 +264,11 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
         <View style={styles.content}>
           <PaseoLogo size={96} />
           <View style={styles.copyBlock}>
-            <Text style={styles.title}>Welcome to Paseo</Text>
+            <Text style={styles.title}>Welcome to xCodex</Text>
             <Text style={styles.subtitle}>Connect your computer to get started</Text>
             {isNative ? (
-              <Pressable style={styles.setupLink} onPress={handleOpenPaseoSite}>
-                <Text style={styles.setupLinkText}>paseo.sh</Text>
+              <Pressable style={styles.setupLink} onPress={handleOpenXcodexSite}>
+                <Text style={styles.setupLinkText}>xCodex</Text>
                 <ExternalLink size={14} color={theme.colors.accent} />
               </Pressable>
             ) : null}

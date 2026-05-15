@@ -62,6 +62,13 @@ function mergeSeqRanges(
 }
 
 function mergeToolCallDetail(existing: ToolCallDetail, incoming: ToolCallDetail): ToolCallDetail {
+  if (existing.type === "unknown" && incoming.type === "unknown") {
+    return {
+      type: "unknown",
+      input: incoming.input ?? existing.input,
+      output: incoming.output ?? existing.output,
+    };
+  }
   if (existing.type === "unknown" && incoming.type !== "unknown") {
     return incoming;
   }
@@ -71,11 +78,23 @@ function mergeToolCallDetail(existing: ToolCallDetail, incoming: ToolCallDetail)
   return incoming;
 }
 
+function isFallbackToolName(name: string): boolean {
+  return name.trim().toLowerCase() === "tool";
+}
+
+function mergeToolCallName(existingName: string, incomingName: string): string {
+  if (isFallbackToolName(incomingName) && !isFallbackToolName(existingName)) {
+    return existingName;
+  }
+  return incomingName;
+}
+
 function mergeToolCallItems(
   existing: Extract<AgentTimelineItem, { type: "tool_call" }>,
   incoming: Extract<AgentTimelineItem, { type: "tool_call" }>,
 ): Extract<AgentTimelineItem, { type: "tool_call" }> {
   const mergedDetail = mergeToolCallDetail(existing.detail, incoming.detail);
+  const mergedName = mergeToolCallName(existing.name, incoming.name);
   const mergedMetadata =
     existing.metadata || incoming.metadata
       ? { ...existing.metadata, ...incoming.metadata }
@@ -84,6 +103,7 @@ function mergeToolCallItems(
   const merged: Extract<AgentTimelineItem, { type: "tool_call" }> = {
     ...existing,
     ...incoming,
+    name: mergedName,
     detail: mergedDetail,
     metadata: mergedMetadata,
   };

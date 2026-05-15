@@ -58,6 +58,30 @@ export interface WorkspaceRegistry {
   remove(workspaceId: string): Promise<void>;
 }
 
+export function createNoopProjectRegistry(): ProjectRegistry {
+  return {
+    initialize: async () => {},
+    existsOnDisk: async () => true,
+    list: async () => [],
+    get: async () => null,
+    upsert: async () => {},
+    archive: async () => {},
+    remove: async () => {},
+  };
+}
+
+export function createNoopWorkspaceRegistry(): WorkspaceRegistry {
+  return {
+    initialize: async () => {},
+    existsOnDisk: async () => true,
+    list: async () => [],
+    get: async () => null,
+    upsert: async () => {},
+    archive: async () => {},
+    remove: async () => {},
+  };
+}
+
 type RegistryRecord = PersistedProjectRecord | PersistedWorkspaceRecord;
 
 class FileBackedRegistry<TRecord extends RegistryRecord> {

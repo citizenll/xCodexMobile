@@ -1,13 +1,18 @@
 import { WebSocket, WebSocketServer } from "ws";
 import type { IncomingMessage, Server as HTTPServer } from "http";
-import { basename, join } from "path";
+import { join } from "path";
 import { hostname as getHostname } from "node:os";
 import type { AgentManager } from "./agent/agent-manager.js";
 import type { AgentStorage } from "./agent/agent-storage.js";
 import type { DownloadTokenStore } from "./file-download/token-store.js";
 import type { TerminalManager } from "../terminal/terminal-manager.js";
 import type pino from "pino";
-import type { ProjectRegistry, WorkspaceRegistry } from "./workspace-registry.js";
+import {
+  createNoopProjectRegistry,
+  createNoopWorkspaceRegistry,
+  type ProjectRegistry,
+  type WorkspaceRegistry,
+} from "./workspace-registry.js";
 import type { FileBackedChatService } from "./chat/chat-service.js";
 import type { LoopService } from "./loop-service.js";
 import type { ScheduleService } from "./schedule/service.js";
@@ -36,8 +41,8 @@ import type {
 } from "./agent/provider-launch-config.js";
 import { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
 import { buildProviderRegistry, createClientsFromRegistry } from "./agent/provider-registry.js";
-import type { WorkspaceGitRuntimeSnapshot, WorkspaceGitService } from "./workspace-git-service.js";
-import { buildWorkspaceGitMetadataFromSnapshot } from "./workspace-git-metadata.js";
+import type { WorkspaceGitService } from "./workspace-git-service.js";
+import { createFallbackWorkspaceGitService } from "./fallback-workspace-git-service.js";
 import { PushTokenStore } from "./push/token-store.js";
 import { createPushNotificationSender, type PushNotificationSender } from "./push/notifications.js";
 import type { ScriptHealthState } from "./script-health-monitor.js";
@@ -45,6 +50,8 @@ import type { ScriptRouteStore } from "./script-proxy.js";
 import type { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
 import type { SpeechReadinessSnapshot, SpeechService } from "./speech/speech-runtime.js";
 import type { VoiceCallerContext, VoiceSpeakHandler } from "./voice-types.js";
+import type { XcodexBridgeClient } from "./xcodex-bridge.js";
+import type { DaemonConnectorMode } from "./persisted-config.js";
 import { computeNotificationPlan, type ClientPresenceState } from "./agent-attention-policy.js";
 import {
   buildAgentAttentionNotificationPayload,
@@ -80,106 +87,6 @@ interface WebSocketServerConfig {
 }
 
 type WebSocketRuntimeMetrics = SessionRuntimeMetrics & CheckoutDiffMetrics;
-
-function createFallbackWorkspaceGitSnapshot(cwd: string): WorkspaceGitRuntimeSnapshot {
-  return {
-    cwd,
-    git: {
-      isGit: false,
-      repoRoot: null,
-      mainRepoRoot: null,
-      currentBranch: null,
-      remoteUrl: null,
-      isPaseoOwnedWorktree: false,
-      isDirty: null,
-      baseRef: null,
-      aheadBehind: null,
-      aheadOfOrigin: null,
-      behindOfOrigin: null,
-      hasRemote: false,
-      diffStat: null,
-    },
-    github: {
-      featuresEnabled: false,
-      pullRequest: null,
-      error: null,
-    },
-  };
-}
-
-function createFallbackWorkspaceGitService(): WorkspaceGitService {
-  return {
-    registerWorkspace: () => ({
-      unsubscribe: () => {},
-    }),
-    onSnapshotUpdated: () => ({
-      unsubscribe: () => {},
-    }),
-    peekSnapshot: () => null,
-    getCheckout: async (cwd: string) => ({
-      cwd,
-      isGit: false,
-      currentBranch: null,
-      remoteUrl: null,
-      worktreeRoot: null,
-      isPaseoOwnedWorktree: false,
-      mainRepoRoot: null,
-    }),
-    getSnapshot: async (cwd: string) => createFallbackWorkspaceGitSnapshot(cwd),
-    getCheckoutDiff: async () => ({ diff: "" }),
-    validateBranchRef: async () => ({ kind: "not-found" }),
-    hasLocalBranch: async () => false,
-    suggestBranchesForCwd: async () => [],
-    listStashes: async () => [],
-    listWorktrees: async () => [],
-    getWorkspaceGitMetadata: async (cwd: string, options) => {
-      const snapshot = createFallbackWorkspaceGitSnapshot(cwd);
-      return buildWorkspaceGitMetadataFromSnapshot({
-        cwd,
-        directoryName: options?.directoryName ?? basename(cwd),
-        isGit: snapshot.git.isGit,
-        repoRoot: snapshot.git.repoRoot,
-        mainRepoRoot: snapshot.git.mainRepoRoot,
-        currentBranch: snapshot.git.currentBranch,
-        remoteUrl: snapshot.git.remoteUrl,
-      });
-    },
-    resolveRepoRoot: async (cwd: string) => cwd,
-    resolveDefaultBranch: async () => "main",
-    resolveRepoRemoteUrl: async () => null,
-    refresh: async () => {},
-    requestWorkingTreeWatch: async () => ({
-      repoRoot: null,
-      unsubscribe: () => {},
-    }),
-    scheduleRefreshForCwd: () => {},
-    dispose: () => {},
-  };
-}
-
-function createNoopProjectRegistry(): ProjectRegistry {
-  return {
-    initialize: async () => {},
-    existsOnDisk: async () => true,
-    list: async () => [],
-    get: async () => null,
-    upsert: async () => {},
-    archive: async () => {},
-    remove: async () => {},
-  };
-}
-
-function createNoopWorkspaceRegistry(): WorkspaceRegistry {
-  return {
-    initialize: async () => {},
-    existsOnDisk: async () => true,
-    list: async () => [],
-    get: async () => null,
-    upsert: async () => {},
-    archive: async () => {},
-    remove: async () => {},
-  };
-}
 
 function toServerCapabilityState(params: {
   state: SpeechReadinessSnapshot["dictation"];
@@ -300,10 +207,10 @@ interface RequiredWebSocketServices {
 }
 
 function requireWebSocketServices(params: {
-  chatService?: FileBackedChatService;
-  loopService?: LoopService;
-  scheduleService?: ScheduleService;
-  checkoutDiffManager?: CheckoutDiffManager;
+  chatService?: FileBackedChatService | null;
+  loopService?: LoopService | null;
+  scheduleService?: ScheduleService | null;
+  checkoutDiffManager?: CheckoutDiffManager | null;
 }): RequiredWebSocketServices {
   const { chatService, loopService, scheduleService, checkoutDiffManager } = params;
   if (!chatService) {
@@ -321,6 +228,24 @@ function requireWebSocketServices(params: {
   return { chatService, loopService, scheduleService, checkoutDiffManager };
 }
 
+interface OptionalWebSocketServices {
+  chatService?: FileBackedChatService | null;
+  loopService?: LoopService | null;
+  scheduleService?: ScheduleService | null;
+  checkoutDiffManager?: CheckoutDiffManager | null;
+}
+
+function resolveWebSocketServices(
+  params: OptionalWebSocketServices & {
+    connectorMode: DaemonConnectorMode;
+  },
+): OptionalWebSocketServices {
+  if (params.connectorMode === "xcodex") {
+    return params;
+  }
+  return requireWebSocketServices(params);
+}
+
 /**
  * WebSocket server that only accepts sockets + parses/forwards messages to the session layer.
  */
@@ -336,10 +261,10 @@ export class VoiceAssistantWebSocketServer {
   private readonly agentStorage: AgentStorage;
   private readonly projectRegistry: ProjectRegistry;
   private readonly workspaceRegistry: WorkspaceRegistry;
-  private readonly chatService: FileBackedChatService;
-  private readonly loopService: LoopService;
-  private readonly scheduleService: ScheduleService;
-  private readonly checkoutDiffManager: CheckoutDiffManager;
+  private readonly chatService: FileBackedChatService | null;
+  private readonly loopService: LoopService | null;
+  private readonly scheduleService: ScheduleService | null;
+  private readonly checkoutDiffManager: CheckoutDiffManager | null;
   private readonly github: GitHubService;
   private readonly workspaceGitService: WorkspaceGitService;
   private readonly downloadTokenStore: DownloadTokenStore;
@@ -347,6 +272,7 @@ export class VoiceAssistantWebSocketServer {
   private readonly daemonConfigStore: DaemonConfigStore;
   private readonly pushTokenStore: PushTokenStore;
   private readonly pushNotificationSender: PushNotificationSender;
+  private readonly xcodexBridge: XcodexBridgeClient | null;
   private readonly mcpBaseUrl: string | null;
   private speech!: SpeechService | null;
   private terminalManager!: TerminalManager | null;
@@ -364,6 +290,8 @@ export class VoiceAssistantWebSocketServer {
   private agentProviderRuntimeSettings: AgentProviderRuntimeSettingsMap | undefined;
   private providerOverrides: Record<string, ProviderOverride> | undefined;
   private isDev!: boolean;
+  private agentRuntimeEnabled!: boolean;
+  private connectorMode!: DaemonConnectorMode;
   private readonly providerSnapshotManager: ProviderSnapshotManager;
   private onLifecycleIntent!: ((intent: SessionLifecycleIntent) => void) | null;
   private onBranchChanged!:
@@ -399,10 +327,10 @@ export class VoiceAssistantWebSocketServer {
     onLifecycleIntent?: (intent: SessionLifecycleIntent) => void,
     projectRegistry?: ProjectRegistry,
     workspaceRegistry?: WorkspaceRegistry,
-    chatService?: FileBackedChatService,
-    loopService?: LoopService,
-    scheduleService?: ScheduleService,
-    checkoutDiffManager?: CheckoutDiffManager,
+    chatService?: FileBackedChatService | null,
+    loopService?: LoopService | null,
+    scheduleService?: ScheduleService | null,
+    checkoutDiffManager?: CheckoutDiffManager | null,
     scriptRouteStore?: ScriptRouteStore | null,
     scriptRuntimeStore?: WorkspaceScriptRuntimeStore | null,
     onBranchChanged?: (
@@ -416,6 +344,9 @@ export class VoiceAssistantWebSocketServer {
     workspaceGitService?: WorkspaceGitService,
     github?: GitHubService,
     pushNotificationSender?: PushNotificationSender,
+    xcodexBridge?: XcodexBridgeClient | null,
+    agentRuntimeEnabled?: boolean,
+    connectorMode?: DaemonConnectorMode,
   ) {
     this.logger = logger.child({ module: "websocket-server" });
     this.serverId = serverId;
@@ -427,16 +358,17 @@ export class VoiceAssistantWebSocketServer {
     this.agentStorage = agentStorage;
     this.projectRegistry = projectRegistry ?? createNoopProjectRegistry();
     this.workspaceRegistry = workspaceRegistry ?? createNoopWorkspaceRegistry();
-    const requiredServices = requireWebSocketServices({
+    const services = resolveWebSocketServices({
+      connectorMode: connectorMode ?? "xcodex",
       chatService,
       loopService,
       scheduleService,
       checkoutDiffManager,
     });
-    this.chatService = requiredServices.chatService;
-    this.loopService = requiredServices.loopService;
-    this.scheduleService = requiredServices.scheduleService;
-    this.checkoutDiffManager = requiredServices.checkoutDiffManager;
+    this.chatService = services.chatService ?? null;
+    this.loopService = services.loopService ?? null;
+    this.scheduleService = services.scheduleService ?? null;
+    this.checkoutDiffManager = services.checkoutDiffManager ?? null;
     this.github = github ?? createGitHubService();
     this.workspaceGitService = workspaceGitService ?? createFallbackWorkspaceGitService();
     this.downloadTokenStore = downloadTokenStore;
@@ -450,6 +382,8 @@ export class VoiceAssistantWebSocketServer {
       agentProviderRuntimeSettings,
       providerOverrides,
       isDev,
+      agentRuntimeEnabled,
+      connectorMode,
       onLifecycleIntent,
       scriptRouteStore,
       scriptRuntimeStore,
@@ -459,12 +393,15 @@ export class VoiceAssistantWebSocketServer {
       resolveScriptHealth,
     });
     const providerSnapshotLogger = this.logger.child({ module: "provider-snapshot-manager" });
+    const providerSnapshotRegistry = this.agentRuntimeEnabled
+      ? buildProviderRegistry(providerSnapshotLogger, {
+          runtimeSettings: this.agentProviderRuntimeSettings,
+          providerOverrides: this.providerOverrides,
+          isDev: this.isDev,
+        })
+      : {};
     this.providerSnapshotManager = new ProviderSnapshotManager(
-      buildProviderRegistry(providerSnapshotLogger, {
-        runtimeSettings: this.agentProviderRuntimeSettings,
-        providerOverrides: this.providerOverrides,
-        isDev: this.isDev,
-      }),
+      providerSnapshotRegistry,
       providerSnapshotLogger,
     );
     this.serverCapabilities = buildServerCapabilities({
@@ -479,12 +416,16 @@ export class VoiceAssistantWebSocketServer {
         this.providerOverrides,
         config.providers,
       );
-      const registry = buildProviderRegistry(providerSnapshotLogger, {
-        runtimeSettings: this.agentProviderRuntimeSettings,
-        providerOverrides: this.providerOverrides,
-        isDev: this.isDev,
-      });
-      const clients = createClientsFromRegistry(registry, providerSnapshotLogger);
+      const registry = this.agentRuntimeEnabled
+        ? buildProviderRegistry(providerSnapshotLogger, {
+            runtimeSettings: this.agentProviderRuntimeSettings,
+            providerOverrides: this.providerOverrides,
+            isDev: this.isDev,
+          })
+        : {};
+      const clients = this.agentRuntimeEnabled
+        ? createClientsFromRegistry(registry, providerSnapshotLogger)
+        : {};
       this.providerSnapshotManager.replaceRegistry(registry);
       this.agentManager.updateProviderRegistry({ providerDefinitions: registry, clients });
       this.broadcastDaemonConfigChanged(config);
@@ -494,6 +435,7 @@ export class VoiceAssistantWebSocketServer {
     this.pushTokenStore = new PushTokenStore(pushLogger, join(paseoHome, "push-tokens.json"));
     this.pushNotificationSender =
       pushNotificationSender ?? createPushNotificationSender(pushLogger, this.pushTokenStore);
+    this.xcodexBridge = xcodexBridge ?? null;
 
     this.agentManager.setAgentAttentionCallback((params) => {
       void this.broadcastAgentAttention(params).catch((err) => {
@@ -514,6 +456,8 @@ export class VoiceAssistantWebSocketServer {
     agentProviderRuntimeSettings: AgentProviderRuntimeSettingsMap | undefined;
     providerOverrides: Record<string, ProviderOverride> | undefined;
     isDev: boolean | undefined;
+    agentRuntimeEnabled: boolean | undefined;
+    connectorMode: DaemonConnectorMode | undefined;
     onLifecycleIntent: ((intent: SessionLifecycleIntent) => void) | undefined;
     scriptRouteStore: ScriptRouteStore | null | undefined;
     scriptRuntimeStore: WorkspaceScriptRuntimeStore | null | undefined;
@@ -530,6 +474,9 @@ export class VoiceAssistantWebSocketServer {
     this.agentProviderRuntimeSettings = params.agentProviderRuntimeSettings;
     this.providerOverrides = params.providerOverrides;
     this.isDev = params.isDev === true;
+    this.connectorMode = params.connectorMode ?? "xcodex";
+    this.agentRuntimeEnabled =
+      this.connectorMode === "paseo" && params.agentRuntimeEnabled === true;
     this.onLifecycleIntent = params.onLifecycleIntent ?? null;
     this.scriptRouteStore = params.scriptRouteStore ?? null;
     this.scriptRuntimeStore = params.scriptRuntimeStore ?? null;
@@ -730,7 +677,7 @@ export class VoiceAssistantWebSocketServer {
 
     await Promise.all(cleanupPromises);
     this.providerSnapshotManager.destroy();
-    this.checkoutDiffManager.dispose();
+    this.checkoutDiffManager?.dispose();
     this.workspaceGitService.dispose();
     this.pendingConnections.clear();
     this.sessions.clear();
@@ -920,6 +867,9 @@ export class VoiceAssistantWebSocketServer {
           : undefined,
       agentProviderRuntimeSettings: this.agentProviderRuntimeSettings,
       providerOverrides: this.providerOverrides,
+      xcodexBridge: this.xcodexBridge,
+      agentRuntimeEnabled: this.agentRuntimeEnabled,
+      connectorMode: this.connectorMode,
       isDev: this.isDev,
     });
 
@@ -1567,7 +1517,12 @@ export class VoiceAssistantWebSocketServer {
     }
 
     return {
-      ...this.checkoutDiffManager.getMetrics(),
+      ...(this.checkoutDiffManager?.getMetrics() ?? {
+        checkoutDiffTargetCount: 0,
+        checkoutDiffSubscriptionCount: 0,
+        checkoutDiffWatcherCount: 0,
+        checkoutDiffFallbackRefreshTargetCount: 0,
+      }),
       terminalDirectorySubscriptionCount,
       terminalSubscriptionCount,
       inflightRequests,

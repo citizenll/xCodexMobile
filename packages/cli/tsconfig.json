@@ -5,6 +5,12 @@
     "moduleResolution": "NodeNext",
     "outDir": "./dist",
     "rootDir": "./src",
+    "paths": {
+      "@getpaseo/server": ["../server/dist/server/server/exports.d.ts"],
+      "@getpaseo/server/utils/tool-call-parsers": [
+        "../server/dist/server/utils/tool-call-parsers.d.ts"
+      ]
+    },
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,

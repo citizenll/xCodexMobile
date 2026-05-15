@@ -12,6 +12,8 @@ import { ensurePrivateFile, writePrivateFileSync } from "./private-files.js";
 
 export const LogLevelSchema = z.enum(["trace", "debug", "info", "warn", "error", "fatal"]);
 export const LogFormatSchema = z.enum(["pretty", "json"]);
+export const DaemonConnectorModeSchema = z.enum(["xcodex", "paseo"]);
+export type DaemonConnectorMode = z.infer<typeof DaemonConnectorModeSchema>;
 
 const LogConfigSchema = z
   .object({
@@ -241,6 +243,7 @@ export const PersistedConfigSchema = z
     daemon: z
       .object({
         listen: z.string().optional(),
+        connectorMode: DaemonConnectorModeSchema.optional(),
         hostnames: z.union([z.literal(true), z.array(z.string())]).optional(),
         allowedHosts: z.union([z.literal(true), z.array(z.string())]).optional(),
         mcp: z
@@ -249,6 +252,12 @@ export const PersistedConfigSchema = z
             injectIntoAgents: z.boolean().optional(),
           })
           .passthrough()
+          .optional(),
+        agentRuntime: z
+          .object({
+            enabled: z.boolean().optional(),
+          })
+          .strict()
           .optional(),
         autoArchiveAfterMerge: z.boolean().optional(),
         cors: z

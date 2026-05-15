@@ -44,7 +44,10 @@ import {
 import { SidebarCalloutProvider } from "@/contexts/sidebar-callout-context";
 import { ToastProvider } from "@/contexts/toast-context";
 import { VoiceProvider } from "@/contexts/voice-context";
-import { startDaemonIfGateAllows, startHostRuntimeBootstrap } from "@/app/host-runtime-bootstrap";
+import {
+  startDaemonIfGateAllows,
+  startHostRuntimeBootstrap,
+} from "@/runtime/host-runtime-bootstrap";
 import { shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
 import { listenToDesktopEvent } from "@/desktop/electron/events";
 import { updateDesktopWindowControls } from "@/desktop/electron/window";

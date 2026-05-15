@@ -6,10 +6,7 @@ import type { DaemonConfigStore } from "../daemon-config-store.js";
 import type { SessionOutboundMessage } from "../messages.js";
 import { archivePaseoWorktree, killTerminalsUnderPath } from "../paseo-worktree-archive-service.js";
 import { isSameOrDescendantPath } from "../path-utils.js";
-import type {
-  WorkspaceGitRuntimeSnapshot,
-  WorkspaceGitServiceImpl,
-} from "../workspace-git-service.js";
+import type { WorkspaceGitRuntimeSnapshot, WorkspaceGitService } from "../workspace-git-service.js";
 import type { GitHubService } from "../../services/github-service.js";
 import type { TerminalManager } from "../../terminal/terminal-manager.js";
 import { isPaseoOwnedWorktreeCwd } from "../../utils/worktree.js";
@@ -17,7 +14,7 @@ import { isPaseoOwnedWorktreeCwd } from "../../utils/worktree.js";
 export interface AutoArchiveArchiveOptions {
   paseoHome: string;
   daemonConfigStore: DaemonConfigStore;
-  workspaceGitService: WorkspaceGitServiceImpl;
+  workspaceGitService: Pick<WorkspaceGitService, "getSnapshot" | "onSnapshotUpdated">;
   github: GitHubService;
   agentManager: AgentManager;
   agentStorage: AgentStorage;

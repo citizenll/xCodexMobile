@@ -19,6 +19,8 @@ interface TestPaseoDaemonOptions {
   listen?: string;
   logger?: Parameters<typeof createPaseoDaemon>[1];
   mcpDebug?: boolean;
+  agentRuntimeEnabled?: boolean;
+  connectorMode?: PaseoDaemonConfig["connectorMode"];
   relayEnabled?: boolean;
   relayEndpoint?: string;
   agentClients?: Partial<Record<AgentProvider, AgentClient>>;
@@ -154,6 +156,8 @@ async function prepareTestDaemonConfig(
     mcpEnabled: true,
     staticDir,
     mcpDebug: options.mcpDebug ?? false,
+    connectorMode: options.connectorMode ?? "paseo",
+    agentRuntimeEnabled: options.agentRuntimeEnabled ?? true,
     agentClients: options.agentClients ?? createTestAgentClients(),
     agentStoragePath: path.join(paseoHome, "agents"),
     relayEnabled: options.relayEnabled ?? false,

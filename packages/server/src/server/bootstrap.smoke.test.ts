@@ -101,6 +101,8 @@ describe("paseo daemon bootstrap", () => {
       mcpEnabled: false,
       staticDir,
       mcpDebug: false,
+      connectorMode: "paseo",
+      agentRuntimeEnabled: true,
       agentClients: createTestAgentClients(),
       agentStoragePath: path.join(paseoHome, "agents"),
       relayEnabled: false,
@@ -120,6 +122,48 @@ describe("paseo daemon bootstrap", () => {
         "Missing OpenAI credentials",
       );
     } finally {
+      await rm(paseoHomeRoot, { recursive: true, force: true });
+      await rm(staticDir, { recursive: true, force: true });
+    }
+  });
+
+  test("connector-only mode ignores speech credentials and starts without Paseo runtime", async () => {
+    const paseoHomeRoot = await mkdtemp(path.join(os.tmpdir(), "paseo-xcodex-config-"));
+    const paseoHome = path.join(paseoHomeRoot, ".paseo");
+    const staticDir = await mkdtemp(path.join(os.tmpdir(), "paseo-static-"));
+    await mkdir(paseoHome, { recursive: true });
+
+    const config: PaseoDaemonConfig = {
+      listen: "127.0.0.1:0",
+      paseoHome,
+      corsAllowedOrigins: [],
+      hostnames: true,
+      mcpEnabled: true,
+      staticDir,
+      mcpDebug: false,
+      connectorMode: "xcodex",
+      agentRuntimeEnabled: true,
+      agentClients: createTestAgentClients(),
+      agentStoragePath: path.join(paseoHome, "agents"),
+      relayEnabled: false,
+      appBaseUrl: "https://app.paseo.sh",
+      openai: undefined,
+      speech: {
+        providers: {
+          dictationStt: { provider: "openai", explicit: true },
+          voiceStt: { provider: "openai", explicit: true },
+          voiceTts: { provider: "openai", explicit: true },
+        },
+      },
+    };
+
+    const daemon = await createPaseoDaemon(config, pino({ level: "silent" }));
+    try {
+      await daemon.start();
+      expect(daemon.terminalManager).toBeNull();
+      await expect(daemon.agentManager.listProviderAvailability()).resolves.toEqual([]);
+    } finally {
+      await daemon.stop().catch(() => undefined);
       await rm(paseoHomeRoot, { recursive: true, force: true });
       await rm(staticDir, { recursive: true, force: true });
     }
@@ -219,6 +263,8 @@ describe("paseo daemon bootstrap", () => {
         mcpEnabled: false,
         staticDir,
         mcpDebug: false,
+        connectorMode: "paseo",
+        agentRuntimeEnabled: true,
         agentClients: createTestAgentClients(),
         agentStoragePath: path.join(paseoHome, "agents"),
         relayEnabled: true,

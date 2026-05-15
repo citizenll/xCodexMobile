@@ -19,8 +19,8 @@ function resolveSecretFile(params) {
 
 const variants = {
   production: {
-    name: "Paseo",
-    packageId: "sh.paseo",
+    name: "xCodex",
+    packageId: "ai.xcodex.mobile",
     googleServicesFile: resolveSecretFile({
       envKey: "GOOGLE_SERVICES_FILE_PROD",
       fallbackRelativePath: "./.secrets/google-services.prod.json",
@@ -31,8 +31,8 @@ const variants = {
     }),
   },
   development: {
-    name: "Paseo Debug",
-    packageId: "sh.paseo.debug",
+    name: "xCodex",
+    packageId: "ai.xcodex.mobile.debug",
     googleServicesFile: resolveSecretFile({
       envKey: "GOOGLE_SERVICES_FILE_DEBUG",
       fallbackRelativePath: "./.secrets/google-services.debug.json",
@@ -49,18 +49,18 @@ const variant = variants[appVariant] ?? variants.production;
 export default {
   expo: {
     name: variant.name,
-    slug: "voice-mobile",
+    slug: "xcodex-mobile",
     version: pkg.version,
     orientation: "portrait",
     icon: "./assets/images/icon.png",
-    scheme: "paseo",
+    scheme: "xcodex",
     userInterfaceStyle: "automatic",
     newArchEnabled: true,
     runtimeVersion: {
       policy: "appVersion",
     },
     updates: {
-      url: "https://u.expo.dev/0e7f65ce-0367-46c8-a238-2b65963d235a",
+      enabled: false,
     },
     ios: {
       supportsTablet: true,
@@ -143,14 +143,9 @@ export default {
     experiments: {
       typedRoutes: true,
       reactCompiler: true,
-      autolinkingModuleResolution: true,
     },
     extra: {
       router: {},
-      eas: {
-        projectId: "0e7f65ce-0367-46c8-a238-2b65963d235a",
-      },
     },
-    owner: "getpaseo",
   },
 };

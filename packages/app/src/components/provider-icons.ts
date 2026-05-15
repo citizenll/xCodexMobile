@@ -8,6 +8,7 @@ import { PiIcon } from "@/components/icons/pi-icon";
 const PROVIDER_ICONS: Record<string, typeof Bot> = {
   claude: ClaudeIcon as unknown as typeof Bot,
   codex: CodexIcon as unknown as typeof Bot,
+  xcodex: CodexIcon as unknown as typeof Bot,
   copilot: CopilotIcon as unknown as typeof Bot,
   opencode: OpenCodeIcon as unknown as typeof Bot,
   pi: PiIcon as unknown as typeof Bot,

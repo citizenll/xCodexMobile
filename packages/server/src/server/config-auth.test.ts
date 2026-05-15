@@ -55,4 +55,55 @@ describe("daemon auth config", () => {
     expect(config.auth?.password).toMatch(/^\$2[aby]\$12\$/);
     expect(isBearerTokenValid({ password: config.auth?.password, token: "from-env" })).toBe(true);
   });
+
+  test("defaults the fork daemon to xCodex connector-only agent runtime", async () => {
+    const paseoHome = await createPaseoHome({ version: 1 });
+
+    const config = loadConfig(paseoHome, { env: {} });
+    expect(config.connectorMode).toBe("xcodex");
+    expect(config.agentRuntimeEnabled).toBe(false);
+  });
+
+  test("only allows explicit agent runtime opt-in in paseo mode", async () => {
+    const paseoHome = await createPaseoHome({
+      version: 1,
+      daemon: {
+        connectorMode: "paseo",
+        agentRuntime: { enabled: true },
+      },
+    });
+
+    expect(loadConfig(paseoHome, { env: {} }).agentRuntimeEnabled).toBe(true);
+    expect(
+      loadConfig(paseoHome, { env: { PASEO_AGENT_RUNTIME_ENABLED: "false" } }).agentRuntimeEnabled,
+    ).toBe(false);
+  });
+
+  test("ignores legacy agent runtime opt-in while xCodex connector mode is active", async () => {
+    const paseoHome = await createPaseoHome({
+      version: 1,
+      daemon: {
+        agentRuntime: { enabled: true },
+      },
+    });
+
+    const config = loadConfig(paseoHome, { env: {} });
+
+    expect(config.connectorMode).toBe("xcodex");
+    expect(config.agentRuntimeEnabled).toBe(false);
+  });
+
+  test("lets env select full Paseo mode", async () => {
+    const paseoHome = await createPaseoHome({
+      version: 1,
+      daemon: {
+        agentRuntime: { enabled: true },
+      },
+    });
+
+    const config = loadConfig(paseoHome, { env: { PASEO_CONNECTOR_MODE: "paseo" } });
+
+    expect(config.connectorMode).toBe("paseo");
+    expect(config.agentRuntimeEnabled).toBe(true);
+  });
 });

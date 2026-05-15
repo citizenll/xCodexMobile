@@ -112,6 +112,8 @@ describe("agent MCP end-to-end (offline)", () => {
       mcpEnabled: true,
       staticDir,
       mcpDebug: false,
+      connectorMode: "paseo",
+      agentRuntimeEnabled: true,
       agentClients: createTestAgentClients(),
       agentStoragePath: path.join(paseoHome, "agents"),
     };
@@ -182,6 +184,8 @@ describe("agent MCP end-to-end (offline)", () => {
       mcpEnabled: true,
       staticDir,
       mcpDebug: false,
+      connectorMode: "paseo",
+      agentRuntimeEnabled: true,
       agentClients: createTestAgentClients(),
       agentStoragePath: path.join(paseoHome, "agents"),
     };
@@ -204,6 +208,8 @@ describe("agent MCP end-to-end (offline)", () => {
       mcpInjectIntoAgents: false,
       staticDir: disabledStaticDir,
       mcpDebug: false,
+      connectorMode: "paseo",
+      agentRuntimeEnabled: true,
       agentClients: createTestAgentClients(),
       agentStoragePath: path.join(disabledPaseoHome, "agents"),
     };
@@ -290,6 +296,8 @@ describe("agent MCP end-to-end (offline)", () => {
       mcpEnabled: true,
       staticDir,
       mcpDebug: false,
+      connectorMode: "paseo",
+      agentRuntimeEnabled: true,
       agentClients: createTestAgentClients(),
       agentStoragePath: path.join(paseoHome, "agents"),
     };
