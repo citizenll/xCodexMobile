@@ -151,6 +151,8 @@ import { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js
 import { isHostnameAllowed, type HostnamesConfig } from "./hostnames.js";
 import { createRequireBearerMiddleware, type DaemonAuthConfig } from "./auth.js";
 import type { WorkspaceGitService } from "./workspace-git-service.js";
+import { shouldUseTlsForDefaultHostedRelay } from "../shared/daemon-endpoints.js";
+import { DEFAULT_APP_BASE_URL, DEFAULT_RELAY_ENDPOINT } from "../shared/product-defaults.js";
 
 type AgentMcpTransportMap = Map<string, StreamableHTTPServerTransport>;
 
@@ -985,10 +987,11 @@ export async function createPaseoDaemon(
             agentManager.setMcpBaseUrl(value ? mcpBaseUrl : null);
           });
           const relayEnabled = config.relayEnabled ?? true;
-          const relayEndpoint = config.relayEndpoint ?? "relay.paseo.sh:443";
+          const relayEndpoint = config.relayEndpoint ?? DEFAULT_RELAY_ENDPOINT;
           const relayPublicEndpoint = config.relayPublicEndpoint ?? relayEndpoint;
-          const relayUseTls = config.relayUseTls ?? relayEndpoint === "relay.paseo.sh:443";
-          const appBaseUrl = config.appBaseUrl ?? "https://app.paseo.sh";
+          const relayUseTls =
+            config.relayUseTls ?? shouldUseTlsForDefaultHostedRelay(relayEndpoint);
+          const appBaseUrl = config.appBaseUrl ?? DEFAULT_APP_BASE_URL;
 
           if (boundListenTarget.type === "tcp") {
             logger.info(

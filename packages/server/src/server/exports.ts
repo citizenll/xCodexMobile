@@ -27,11 +27,13 @@ export {
 export type { WebSocketFactory, WebSocketLike } from "../client/daemon-client-transport-types.js";
 export {
   buildDaemonWebSocketUrl,
+  DEFAULT_RELAY_ENDPOINT,
   deriveLabelFromEndpoint,
   normalizeHostPort,
   parseConnectionUri,
   shouldUseTlsForDefaultHostedRelay,
 } from "../shared/daemon-endpoints.js";
+export { DEFAULT_APP_BASE_URL } from "../shared/product-defaults.js";
 export { PARENT_AGENT_ID_LABEL } from "../shared/agent-labels.js";
 export {
   DirectTcpHostConnectionSchema,

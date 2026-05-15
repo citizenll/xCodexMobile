@@ -4,6 +4,7 @@ import {
   buildDaemonWebSocketUrl,
   buildRelayWebSocketUrl,
   CURRENT_RELAY_PROTOCOL_VERSION,
+  DEFAULT_RELAY_ENDPOINT,
   extractHostPortFromWebSocketUrl,
   normalizeRelayProtocolVersion,
   parseConnectionUri,
@@ -100,7 +101,7 @@ describe("relay websocket URL versioning", () => {
   test("defaults relay URLs to v2", () => {
     const url = new URL(
       buildRelayWebSocketUrl({
-        endpoint: "relay.paseo.sh:443",
+        endpoint: DEFAULT_RELAY_ENDPOINT,
         useTls: true,
         serverId: "srv_test",
         role: "client",
@@ -114,7 +115,7 @@ describe("relay websocket URL versioning", () => {
   test("includes connectionId when provided (server data sockets)", () => {
     const url = new URL(
       buildRelayWebSocketUrl({
-        endpoint: "relay.paseo.sh:443",
+        endpoint: DEFAULT_RELAY_ENDPOINT,
         useTls: true,
         serverId: "srv_test",
         role: "server",
@@ -128,7 +129,7 @@ describe("relay websocket URL versioning", () => {
   test("allows explicitly requesting v1 relay URLs", () => {
     const url = new URL(
       buildRelayWebSocketUrl({
-        endpoint: "relay.paseo.sh:443",
+        endpoint: DEFAULT_RELAY_ENDPOINT,
         useTls: true,
         serverId: "srv_test",
         role: "server",
@@ -153,7 +154,7 @@ describe("relay websocket URLs", () => {
   test("uses ws for port 443 when TLS is disabled", () => {
     const url = new URL(
       buildRelayWebSocketUrl({
-        endpoint: "relay.paseo.sh:443",
+        endpoint: DEFAULT_RELAY_ENDPOINT,
         useTls: false,
         serverId: "srv_test",
         role: "client",
@@ -166,7 +167,7 @@ describe("relay websocket URLs", () => {
   test("uses wss for non-443 ports when TLS is enabled", () => {
     const url = new URL(
       buildRelayWebSocketUrl({
-        endpoint: "relay.paseo.sh:6767",
+        endpoint: "relay.example.com:6767",
         useTls: true,
         serverId: "srv_test",
         role: "client",
@@ -191,8 +192,8 @@ describe("relay websocket URLs", () => {
 });
 
 describe("shouldUseTlsForDefaultHostedRelay", () => {
-  test("returns true for the hosted Paseo relay on port 443", () => {
-    expect(shouldUseTlsForDefaultHostedRelay("relay.paseo.sh:443")).toBe(true);
+  test("returns true for the hosted relay on port 443", () => {
+    expect(shouldUseTlsForDefaultHostedRelay(DEFAULT_RELAY_ENDPOINT)).toBe(true);
   });
 
   test("returns true for any self-hosted relay on port 443", () => {

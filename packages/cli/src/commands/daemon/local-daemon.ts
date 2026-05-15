@@ -2,7 +2,12 @@ import { spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { loadConfig, resolvePaseoHome, spawnProcess } from "@getpaseo/server";
+import {
+  DEFAULT_RELAY_ENDPOINT,
+  loadConfig,
+  resolvePaseoHome,
+  spawnProcess,
+} from "@getpaseo/server";
 import treeKill from "tree-kill";
 import { tryConnectToDaemon } from "../../utils/client.js";
 
@@ -407,7 +412,7 @@ export function resolveLocalDaemonState(options: { home?: string } = {}): LocalD
     home,
     listen,
     relayEnabled: config.relayEnabled ?? true,
-    relayEndpoint: config.relayPublicEndpoint ?? config.relayEndpoint ?? "relay.paseo.sh:443",
+    relayEndpoint: config.relayPublicEndpoint ?? config.relayEndpoint ?? DEFAULT_RELAY_ENDPOINT,
     relayUseTls: config.relayUseTls ?? false,
     logPath,
     pidPath,

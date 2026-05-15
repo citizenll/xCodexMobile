@@ -21,10 +21,10 @@ import { AgentProviderSchema } from "./agent/provider-manifest.js";
 import { hashDaemonPassword } from "./auth.js";
 import { resolveSpeechConfig } from "./speech/speech-config-resolver.js";
 import { mergeHostnames, parseHostnamesEnv, type HostnamesConfig } from "./hostnames.js";
+import { shouldUseTlsForDefaultHostedRelay } from "../shared/daemon-endpoints.js";
+import { DEFAULT_APP_BASE_URL, DEFAULT_RELAY_ENDPOINT } from "../shared/product-defaults.js";
 
 const DEFAULT_PORT = 6767;
-const DEFAULT_RELAY_ENDPOINT = "relay.paseo.sh:443";
-const DEFAULT_APP_BASE_URL = "https://app.paseo.sh";
 
 function parseBooleanEnv(value: string | undefined): boolean | undefined {
   if (value === undefined) {
@@ -180,7 +180,7 @@ function resolveRelayConfig(input: ResolveRelayInput): ResolvedRelay {
     input.cliRelayUseTls ??
     (input.env.PASEO_RELAY_USE_TLS !== undefined
       ? (parseBooleanEnv(input.env.PASEO_RELAY_USE_TLS) ?? false)
-      : (input.persisted.daemon?.relay?.useTls ?? endpoint === DEFAULT_RELAY_ENDPOINT));
+      : (input.persisted.daemon?.relay?.useTls ?? shouldUseTlsForDefaultHostedRelay(endpoint)));
   return { enabled, endpoint, publicEndpoint, useTls };
 }
 

@@ -15,8 +15,8 @@ export interface ParsedConnectionUri extends ConnectionUriParts {
 export type RelayRole = "server" | "client";
 export type RelayProtocolVersion = "1" | "2";
 
+export { DEFAULT_RELAY_ENDPOINT } from "./product-defaults.js";
 export const CURRENT_RELAY_PROTOCOL_VERSION: RelayProtocolVersion = "2";
-export const DEFAULT_RELAY_ENDPOINT = "relay.paseo.sh:443";
 
 export function normalizeRelayProtocolVersion(
   value: unknown,

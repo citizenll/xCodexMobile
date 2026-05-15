@@ -4,6 +4,8 @@ import { createConnectionOfferV2, encodeOfferToFragmentUrl } from "./connection-
 import { loadOrCreateDaemonKeyPair } from "./daemon-keypair.js";
 import { renderPairingQr } from "./pairing-qr.js";
 import { getOrCreateServerId } from "./server-id.js";
+import { shouldUseTlsForDefaultHostedRelay } from "../shared/daemon-endpoints.js";
+import { DEFAULT_APP_BASE_URL, DEFAULT_RELAY_ENDPOINT } from "../shared/product-defaults.js";
 
 export interface LocalPairingOffer {
   relayEnabled: boolean;
@@ -30,10 +32,10 @@ export async function generateLocalPairingOffer(args: {
     };
   }
 
-  const relayEndpoint = args.relayEndpoint ?? "relay.paseo.sh:443";
+  const relayEndpoint = args.relayEndpoint ?? DEFAULT_RELAY_ENDPOINT;
   const relayPublicEndpoint = args.relayPublicEndpoint ?? relayEndpoint;
-  const relayUseTls = args.relayUseTls ?? relayEndpoint === "relay.paseo.sh:443";
-  const appBaseUrl = args.appBaseUrl ?? "https://app.paseo.sh";
+  const relayUseTls = args.relayUseTls ?? shouldUseTlsForDefaultHostedRelay(relayEndpoint);
+  const appBaseUrl = args.appBaseUrl ?? DEFAULT_APP_BASE_URL;
   const serverId = getOrCreateServerId(args.paseoHome, { logger: args.logger });
   const daemonKeyPair = await loadOrCreateDaemonKeyPair(args.paseoHome, args.logger);
   const offer = await createConnectionOfferV2({

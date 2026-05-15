@@ -3,12 +3,14 @@ import pino from "pino";
 import net from "node:net";
 import path from "node:path";
 import os from "node:os";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { Writable } from "node:stream";
 import { spawn } from "node:child_process";
 
 import { generateLocalPairingOffer } from "../pairing-offer.js";
 import { createTestPaseoDaemon } from "../test-utils/paseo-daemon.js";
+import { DEFAULT_APP_BASE_URL, DEFAULT_RELAY_ENDPOINT } from "../../shared/product-defaults.js";
 
 function createCapturingLogger() {
   const lines: string[] = [];
@@ -69,6 +71,23 @@ async function getAvailablePort(): Promise<number> {
   });
 }
 
+function resolveNodeBin(repoRoot: string, name: string): string {
+  const extensions = process.platform === "win32" ? [".cmd", ""] : [""];
+  for (const extension of extensions) {
+    const candidate = path.resolve(repoRoot, "node_modules/.bin", `${name}${extension}`);
+    if (existsSync(candidate)) return candidate;
+  }
+  return path.resolve(repoRoot, "node_modules/.bin", name);
+}
+
+function resolveTsxCommand(repoRoot: string): { command: string; argsPrefix: string[] } {
+  const cliPath = path.resolve(repoRoot, "node_modules/tsx/dist/cli.mjs");
+  if (existsSync(cliPath)) {
+    return { command: process.execPath, argsPrefix: [cliPath] };
+  }
+  return { command: resolveNodeBin(repoRoot, "tsx"), argsPrefix: [] };
+}
+
 describe("ConnectionOfferV2 (daemon E2E)", () => {
   const ORIGINAL_ENV = { ...process.env };
 
@@ -95,7 +114,7 @@ describe("ConnectionOfferV2 (daemon E2E)", () => {
         relayPublicEndpoint: daemon.config.relayPublicEndpoint,
         appBaseUrl: daemon.config.appBaseUrl,
       });
-      expect(offerUrl.startsWith("https://app.paseo.sh/#offer=")).toBe(true);
+      expect(offerUrl.startsWith(`${DEFAULT_APP_BASE_URL}/#offer=`)).toBe(true);
 
       const offer = decodeOfferFromFragmentUrl(offerUrl) as {
         v: number;
@@ -108,7 +127,7 @@ describe("ConnectionOfferV2 (daemon E2E)", () => {
       expect(typeof offer.serverId).toBe("string");
       expect(offer.serverId.length).toBeGreaterThan(0);
       expect(offer.serverId.startsWith("srv_")).toBe(true);
-      expect(offer.relay.endpoint).toBe("relay.paseo.sh:443");
+      expect(offer.relay.endpoint).toBe(DEFAULT_RELAY_ENDPOINT);
       expect(typeof offer.daemonPublicKeyB64).toBe("string");
       expect(offer.daemonPublicKeyB64.length).toBeGreaterThan(0);
       expect(() => Buffer.from(offer.daemonPublicKeyB64, "base64")).not.toThrow();
@@ -203,7 +222,7 @@ describe("ConnectionOfferV2 (daemon E2E)", () => {
 
     const serverRoot = path.resolve(import.meta.dirname, "../../..");
     const supervisorPath = path.join(serverRoot, "scripts/supervisor-entrypoint.ts");
-    const tsxBin = path.resolve(serverRoot, "../../node_modules/.bin/tsx");
+    const tsx = resolveTsxCommand(path.resolve(serverRoot, "../.."));
 
     const env = {
       ...process.env,
@@ -216,7 +235,7 @@ describe("ConnectionOfferV2 (daemon E2E)", () => {
     };
 
     const stdoutLines: string[] = [];
-    const proc = spawn(tsxBin, [supervisorPath, "--dev", "--no-relay"], {
+    const proc = spawn(tsx.command, [...tsx.argsPrefix, supervisorPath, "--dev", "--no-relay"], {
       env,
       stdio: ["ignore", "pipe", "pipe"],
     });

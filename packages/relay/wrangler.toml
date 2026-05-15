@@ -1,6 +1,10 @@
-name = "paseo-relay"
+name = "xcodex-relay"
 main = "src/cloudflare-adapter.ts"
 compatibility_date = "2024-12-01"
+
+routes = [
+  { pattern = "relay.xcodex.app", custom_domain = true },
+]
 
 [observability]
 enabled = true

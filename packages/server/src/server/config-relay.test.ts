@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 
 import { loadConfig } from "./config.js";
+import { DEFAULT_RELAY_ENDPOINT } from "../shared/product-defaults.js";
 
 const roots: string[] = [];
 
@@ -46,5 +47,6 @@ describe("daemon relay config", () => {
 
     const hostedHome = await createPaseoHome({ version: 1, daemon: { relay: {} } });
     expect(loadConfig(hostedHome, { env: {} }).relayUseTls).toBe(true);
+    expect(loadConfig(hostedHome, { env: {} }).relayEndpoint).toBe(DEFAULT_RELAY_ENDPOINT);
   });
 });
