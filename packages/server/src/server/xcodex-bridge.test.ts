@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createServer } from "node:net";
@@ -19,6 +19,28 @@ afterEach(async () => {
 
 function createLogger() {
   return pino({ enabled: false });
+}
+
+function findMessageSendRequest(requests: unknown[], messageId: string) {
+  return requests.find(
+    (request) =>
+      typeof request === "object" &&
+      request !== null &&
+      (request as { kind?: unknown }).kind === "message.send" &&
+      (request as { payload?: { messageId?: unknown } }).payload?.messageId === messageId,
+  ) as { payload: { inputItems: Array<Record<string, unknown>> } } | undefined;
+}
+
+async function expectRichMobileMessageRequest(requests: unknown[]) {
+  const richMessageRequest = findMessageSendRequest(requests, "message-2");
+  expect(richMessageRequest?.payload.inputItems).toEqual([
+    { type: "text", text: "from mobile with image", text_elements: [] },
+    expect.objectContaining({ type: "localImage", path: expect.any(String) }),
+    { type: "text", text: "extra context", text_elements: [] },
+  ]);
+  const imagePath = richMessageRequest?.payload.inputItems[1]?.path;
+  expect(typeof imagePath).toBe("string");
+  await expect(readFile(imagePath as string)).resolves.toEqual(Buffer.from("image-bytes"));
 }
 
 test("projects xCodex host bridge agents and timeline into Paseo payloads", async () => {
@@ -313,6 +335,22 @@ test("projects xCodex host bridge agents and timeline into Paseo payloads", asyn
         messageId: "message-1",
       }),
     ).resolves.toMatchObject({ accepted: true, turnId: "turn-1" });
+    await expect(
+      bridge.sendMessage({
+        agentId: "xcodex:workspace-1:thread-1",
+        text: "from mobile with image",
+        messageId: "message-2",
+        images: [{ data: "aW1hZ2UtYnl0ZXM=", mimeType: "image/png" }],
+        attachments: [
+          {
+            type: "text",
+            mimeType: "text/plain",
+            title: "Context",
+            text: "extra context",
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({ accepted: true, turnId: "turn-1" });
     await expect(bridge.cancelAgent("xcodex:workspace-1:thread-1")).resolves.toMatchObject({
       accepted: true,
       turnId: "turn-1",
@@ -349,6 +387,7 @@ test("projects xCodex host bridge agents and timeline into Paseo payloads", asyn
         }),
       }),
     );
+    await expectRichMobileMessageRequest(requests);
     expect(requests).toContainEqual(
       expect.objectContaining({
         kind: "turn.interrupt",

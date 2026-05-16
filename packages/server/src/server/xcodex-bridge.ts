@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { createConnection } from "node:net";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -14,10 +14,12 @@ import type {
 } from "./messages.js";
 import type { AgentTimelineRow } from "./agent/agent-timeline-store-types.js";
 import { projectTimelineRows, type TimelineProjectionMode } from "./agent/timeline-projection.js";
+import { renderPromptAttachmentAsText } from "./agent/prompt-attachments.js";
 import {
   deriveAgentStateBucket,
   getWorkspaceStateBucketPriority,
 } from "../shared/agent-state-bucket.js";
+import type { AgentAttachment, SendAgentMessageRequest } from "../shared/messages.js";
 import { SortablePager } from "./pagination/sortable-pager.js";
 
 const XCODEX_AGENT_PROVIDER = "xcodex";
@@ -32,6 +34,7 @@ const DEFAULT_LOCAL_INFO_FILE = path.join(
   "ai.xcodex.citizenl",
   "xcodex-host-bridge.json",
 );
+const XCODEX_MOBILE_ATTACHMENT_DIR = "xcodex-mobile-attachments";
 
 const HostBridgeInfoSchema = z.object({
   protocolVersion: z.number().int().positive().optional(),
@@ -290,6 +293,8 @@ export interface XcodexBridgeClient {
     text: string;
     messageId?: string;
     inputItems?: unknown[];
+    images?: SendAgentMessageRequest["images"];
+    attachments?: AgentAttachment[];
   }): Promise<{ accepted: boolean; turnId?: string | null; reason?: string | null }>;
   cancelAgent(agentId: string): Promise<{
     accepted: boolean;
@@ -328,6 +333,80 @@ function toIso(ms: number): string {
 
 function titleFor(agent: HostBridgeAgent): string {
   return agent.title?.trim() || agent.preview?.trim() || agent.threadId.slice(0, 8);
+}
+
+function normalizeImageData(mimeType: string, data: string): { mimeType: string; data: string } {
+  const trimmed = data.trim();
+  const dataUrlMatch = /^data:([^;,]+);base64,(.*)$/i.exec(trimmed);
+  if (dataUrlMatch) {
+    return {
+      mimeType: dataUrlMatch[1] || mimeType || "image/png",
+      data: dataUrlMatch[2] ?? "",
+    };
+  }
+  return { mimeType: mimeType || "image/png", data: trimmed };
+}
+
+function imageExtensionForMimeType(mimeType: string): string {
+  switch (mimeType.toLowerCase()) {
+    case "image/jpeg":
+    case "image/jpg":
+      return "jpg";
+    case "image/webp":
+      return "webp";
+    case "image/gif":
+      return "gif";
+    case "image/png":
+    default:
+      return "png";
+  }
+}
+
+async function writeXcodexMobileImageAttachment(image: {
+  data: string;
+  mimeType: string;
+}): Promise<string> {
+  const normalized = normalizeImageData(image.mimeType, image.data);
+  const attachmentsDir = path.join(tmpdir(), XCODEX_MOBILE_ATTACHMENT_DIR);
+  await fs.mkdir(attachmentsDir, { recursive: true });
+  const filePath = path.join(
+    attachmentsDir,
+    `${randomUUID()}.${imageExtensionForMimeType(normalized.mimeType)}`,
+  );
+  await fs.writeFile(filePath, Buffer.from(normalized.data, "base64"));
+  return filePath;
+}
+
+async function buildXcodexMobileInputItems(params: {
+  text: string;
+  inputItems?: unknown[];
+  images?: SendAgentMessageRequest["images"];
+  attachments?: AgentAttachment[];
+}): Promise<unknown[] | undefined> {
+  const hasImages = (params.images?.length ?? 0) > 0;
+  const hasAttachments = (params.attachments?.length ?? 0) > 0;
+  if (!hasImages && !hasAttachments) {
+    return params.inputItems;
+  }
+
+  const inputItems = params.inputItems ? [...params.inputItems] : [];
+  if (inputItems.length === 0 && params.text.trim().length > 0) {
+    inputItems.push({ type: "text", text: params.text, text_elements: [] });
+  }
+
+  for (const image of params.images ?? []) {
+    const filePath = await writeXcodexMobileImageAttachment(image);
+    inputItems.push({ type: "localImage", path: filePath });
+  }
+
+  for (const attachment of params.attachments ?? []) {
+    const rendered = renderPromptAttachmentAsText(attachment).trim();
+    if (rendered.length > 0) {
+      inputItems.push({ type: "text", text: rendered, text_elements: [] });
+    }
+  }
+
+  return inputItems;
 }
 
 function capabilities(): AgentSnapshotPayload["capabilities"] {
@@ -999,15 +1078,21 @@ export function createXcodexBridgeClient(options: {
         entries: toProjectedTimelineEntries(agent.provider, timeline.entries, projection),
       };
     },
-    async sendMessage({ agentId, text, messageId, inputItems }) {
+    async sendMessage({ agentId, text, messageId, inputItems, images, attachments }) {
       if (!agentId.startsWith(XCODEX_AGENT_PREFIX)) {
         throw new Error(`Not an xCodex virtual agent: ${agentId}`);
       }
+      const resolvedInputItems = await buildXcodexMobileInputItems({
+        text,
+        inputItems,
+        images,
+        attachments,
+      });
       const data = await requestV2("message.send", {
         agentId,
         text,
         messageId,
-        ...(inputItems ? { inputItems } : {}),
+        ...(resolvedInputItems ? { inputItems: resolvedInputItems } : {}),
       });
       return z
         .object({

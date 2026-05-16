@@ -438,6 +438,54 @@ describe("dispatchComposerAgentMessage", () => {
       },
     ]);
   });
+
+  it("removes the optimistic tail message when sending fails", async () => {
+    const client = createFakeSendClient({ rejection: new Error("send rejected") });
+    const stream = createFakeStream();
+
+    await expect(
+      dispatchComposerAgentMessage({
+        client,
+        agentId: "agent",
+        text: "will fail",
+        attachments: [],
+        encodeImages: passthroughEncodeImages,
+        stream,
+      }),
+    ).rejects.toThrow("send rejected");
+
+    expect(client.calls).toHaveLength(1);
+    expect(stream.tail.get("agent")).toBeUndefined();
+    expect(stream.head.get("agent")).toBeUndefined();
+  });
+
+  it("removes the optimistic head message when image encoding fails", async () => {
+    const existingItem: StreamItem = {
+      kind: "assistant_message",
+      id: "prior",
+      text: "prior",
+      timestamp: new Date(0),
+    };
+    const client = createFakeSendClient();
+    const stream = createFakeStream(new Map([["agent", [existingItem]]]));
+
+    await expect(
+      dispatchComposerAgentMessage({
+        client,
+        agentId: "agent",
+        text: "bad image",
+        attachments: [{ kind: "image", metadata: imageWithId("img-bad") }],
+        encodeImages: async () => {
+          throw new Error("encode failed");
+        },
+        stream,
+      }),
+    ).rejects.toThrow("encode failed");
+
+    expect(client.calls).toEqual([]);
+    expect(stream.head.get("agent")).toEqual([existingItem]);
+    expect(stream.tail.get("agent")).toBeUndefined();
+  });
 });
 
 describe("queueComposerMessage", () => {

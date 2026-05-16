@@ -8004,6 +8004,8 @@ export class Session {
             agentId,
             text: msg.text,
             messageId: msg.messageId,
+            images: msg.images,
+            attachments: msg.attachments,
           });
           this.emit({
             type: "send_agent_message_response",

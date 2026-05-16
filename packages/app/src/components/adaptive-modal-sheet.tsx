@@ -88,8 +88,9 @@ const styles = StyleSheet.create((theme) => ({
     minWidth: 0,
   },
   title: {
-    flex: 1,
+    flexShrink: 1,
     fontSize: theme.fontSize.lg,
+    lineHeight: 24,
     fontWeight: theme.fontWeight.medium,
   },
   headerActions: {
@@ -115,7 +116,7 @@ const styles = StyleSheet.create((theme) => ({
   },
   bottomSheetHeader: {
     paddingHorizontal: theme.spacing[6],
-    paddingTop: theme.spacing[4],
+    paddingTop: theme.spacing[6],
     paddingBottom: theme.spacing[3],
     flexDirection: "row",
     justifyContent: "space-between",

@@ -228,6 +228,42 @@ type MarkAgentHistorySynchronized = SessionStoreActions["markAgentHistorySynchro
 type SetAgentAuthoritativeHistoryApplied =
   SessionStoreActions["setAgentAuthoritativeHistoryApplied"];
 
+function removeUserMessageFromStreamMap(
+  prev: Map<string, StreamItem[]>,
+  agentId: string,
+  messageId: string,
+): Map<string, StreamItem[]> {
+  const current = prev.get(agentId);
+  if (!current) {
+    return prev;
+  }
+  const nextItems = current.filter(
+    (item) => !(item.kind === "user_message" && item.id === messageId),
+  );
+  if (nextItems.length === current.length) {
+    return prev;
+  }
+  const next = new Map(prev);
+  if (nextItems.length === 0) {
+    next.delete(agentId);
+  } else {
+    next.set(agentId, nextItems);
+  }
+  return next;
+}
+
+function removeOptimisticUserMessageFromStream(input: {
+  serverId: string;
+  agentId: string;
+  messageId: string;
+  setAgentStreamTail: SetAgentStreamTail;
+  setAgentStreamHead: SetAgentStreamHead;
+}): void {
+  const { serverId, agentId, messageId, setAgentStreamTail, setAgentStreamHead } = input;
+  setAgentStreamHead(serverId, (prev) => removeUserMessageFromStreamMap(prev, agentId, messageId));
+  setAgentStreamTail(serverId, (prev) => removeUserMessageFromStreamMap(prev, agentId, messageId));
+}
+
 function clearAgentInitializingFlag(
   setInitializingAgents: SetInitializingAgents,
   serverId: string,
@@ -1658,12 +1694,27 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       images?: AttachmentMetadata[],
       attachments?: AgentAttachment[],
     ) => {
+      if (!client) {
+        console.warn("[Session] sendAgentMessage skipped: daemon unavailable");
+        return;
+      }
+
+      let imagesData: Awaited<ReturnType<typeof encodeImages>>;
+      try {
+        imagesData = await encodeImages(images);
+      } catch (error) {
+        console.error("[Session] Failed to encode agent message images:", error);
+        return;
+      }
+
       const messageId = generateMessageId();
       const userMessage: StreamItem = {
         kind: "user_message",
         id: messageId,
         text: message,
         timestamp: new Date(),
+        ...(images && images.length > 0 ? { images } : {}),
+        ...(attachments && attachments.length > 0 ? { attachments } : {}),
       };
 
       // Append to head if streaming (keeps the user message with the current
@@ -1688,20 +1739,22 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         });
       }
 
-      const imagesData = await encodeImages(images);
-      if (!client) {
-        console.warn("[Session] sendAgentMessage skipped: daemon unavailable");
-        return;
-      }
-      void client
-        .sendAgentMessage(agentId, message, {
+      try {
+        await client.sendAgentMessage(agentId, message, {
           messageId,
           ...(imagesData && imagesData.length > 0 ? { images: imagesData } : {}),
           ...(attachments && attachments.length > 0 ? { attachments } : {}),
-        })
-        .catch((error) => {
-          console.error("[Session] Failed to send agent message:", error);
         });
+      } catch (error) {
+        removeOptimisticUserMessageFromStream({
+          serverId,
+          agentId,
+          messageId,
+          setAgentStreamTail,
+          setAgentStreamHead,
+        });
+        console.error("[Session] Failed to send agent message:", error);
+      }
     },
     [serverId, client, setAgentStreamTail, setAgentStreamHead],
   );

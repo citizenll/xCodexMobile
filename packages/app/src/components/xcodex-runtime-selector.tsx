@@ -63,6 +63,7 @@ const styles = StyleSheet.create((theme) => ({
   subtitle: {
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
+    lineHeight: 20,
   },
   section: {
     gap: theme.spacing[2],
@@ -317,7 +318,7 @@ function RuntimeSheetSubtitle({
   modelLabel: string;
 }) {
   return (
-    <Text style={styles.subtitle} numberOfLines={1}>
+    <Text style={styles.subtitle} numberOfLines={2}>
       {providerLabel} / {supplierLabel} / {modelLabel}
     </Text>
   );

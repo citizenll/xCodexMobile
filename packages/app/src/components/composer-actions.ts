@@ -139,12 +139,17 @@ export async function dispatchComposerAgentMessage(
     ...(wirePayload.attachments.length > 0 ? { attachments: wirePayload.attachments } : {}),
   };
   appendUserMessageToStream(input.agentId, userMessage, input.stream);
-  const imagesData = await input.encodeImages(wirePayload.images);
-  await input.client.sendAgentMessage(input.agentId, input.text, {
-    messageId,
-    images: imagesData ?? [],
-    attachments: wirePayload.attachments,
-  });
+  try {
+    const imagesData = await input.encodeImages(wirePayload.images);
+    await input.client.sendAgentMessage(input.agentId, input.text, {
+      messageId,
+      images: imagesData ?? [],
+      attachments: wirePayload.attachments,
+    });
+  } catch (error) {
+    removeUserMessageFromStream(input.agentId, messageId, input.stream);
+    throw error;
+  }
 }
 
 function appendUserMessageToStream(
@@ -166,6 +171,39 @@ function appendUserMessageToStream(
     next.set(agentId, [...(prev.get(agentId) ?? []), userMessage]);
     return next;
   });
+}
+
+function removeUserMessageFromStream(
+  agentId: string,
+  messageId: string,
+  stream: AgentStreamWriter,
+): void {
+  stream.setHead((prev) => removeUserMessageFromMap(prev, agentId, messageId));
+  stream.setTail((prev) => removeUserMessageFromMap(prev, agentId, messageId));
+}
+
+function removeUserMessageFromMap(
+  prev: Map<string, StreamItem[]>,
+  agentId: string,
+  messageId: string,
+): Map<string, StreamItem[]> {
+  const current = prev.get(agentId);
+  if (!current) {
+    return prev;
+  }
+  const nextItems = current.filter(
+    (item) => !(item.kind === "user_message" && item.id === messageId),
+  );
+  if (nextItems.length === current.length) {
+    return prev;
+  }
+  const next = new Map(prev);
+  if (nextItems.length === 0) {
+    next.delete(agentId);
+  } else {
+    next.set(agentId, nextItems);
+  }
+  return next;
 }
 
 export interface QueueComposerMessageInput {

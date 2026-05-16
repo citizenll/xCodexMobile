@@ -20,6 +20,11 @@ import {
 } from "../xcodex-bridge.js";
 import { DEFAULT_APP_BASE_URL, DEFAULT_RELAY_ENDPOINT } from "../../shared/product-defaults.js";
 import {
+  SendAgentMessageRequestSchema,
+  type AgentAttachment,
+  type SendAgentMessageRequest,
+} from "../../shared/messages.js";
+import {
   createXcodexStreamEventMapper,
   isXcodexTurnLifecycleAppServerEvent,
 } from "./stream-events.js";
@@ -125,6 +130,8 @@ interface SendMessageRequest {
   agentId: string;
   text: string;
   messageId?: string;
+  images?: SendAgentMessageRequest["images"];
+  attachments?: AgentAttachment[];
 }
 
 interface CancelAgentRequest {
@@ -570,12 +577,24 @@ function parseSendMessageRequest(context: ParseContext): SessionRequest {
       "send_agent_message_request requires requestId, agentId, and text",
     );
   }
+  const parsed = SendAgentMessageRequestSchema.safeParse({
+    ...context.message,
+    type: "send_agent_message_request",
+    requestId,
+    agentId,
+    text,
+  });
+  if (!parsed.success) {
+    return context.reject("invalid_request", "send_agent_message_request payload is invalid");
+  }
   return {
     type: "send_agent_message_request",
     requestId,
     agentId,
     text,
     messageId: optionalString(context.message.messageId),
+    images: parsed.data.images,
+    attachments: parsed.data.attachments,
   };
 }
 
@@ -1298,6 +1317,8 @@ class ClientSession {
       agentId: request.agentId,
       text: request.text,
       messageId: request.messageId,
+      images: request.images,
+      attachments: request.attachments,
     });
     this.sendSession({
       type: "send_agent_message_response",
