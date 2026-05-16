@@ -133,6 +133,44 @@ interface CancelAgentRequest {
   agentId: string;
 }
 
+interface SetAgentModelRequest {
+  type: "set_agent_model_request";
+  requestId: string;
+  agentId: string;
+  modelId: string | null;
+}
+
+interface ProvidersSnapshotRequest {
+  type: "get_providers_snapshot_request";
+  requestId: string;
+  cwd?: string;
+}
+
+interface RefreshProvidersSnapshotRequest {
+  type: "refresh_providers_snapshot_request";
+  requestId: string;
+  cwd?: string;
+  providers?: string[];
+}
+
+interface XcodexRuntimeCatalogRequest {
+  type: "xcodex_runtime_catalog_request";
+  requestId: string;
+  agentId: string;
+  includeModels?: boolean;
+}
+
+interface XcodexThreadRuntimeSetRequest {
+  type: "xcodex_thread_runtime_set_request";
+  requestId: string;
+  agentId: string;
+  providerId: string;
+  supplierId: string;
+  modelId?: string | null;
+  realProviderOverride?: string | null;
+  expectedUpdatedAtMs?: number;
+}
+
 interface FileExplorerRequest {
   type: "file_explorer_request";
   requestId: string;
@@ -154,6 +192,11 @@ type SessionRequest =
   | TimelineRequest
   | SendMessageRequest
   | CancelAgentRequest
+  | SetAgentModelRequest
+  | ProvidersSnapshotRequest
+  | RefreshProvidersSnapshotRequest
+  | XcodexRuntimeCatalogRequest
+  | XcodexThreadRuntimeSetRequest
   | FileExplorerRequest
   | ProjectIconRequest
   | { type: "fetch_agent_request"; requestId: string; agentId: string }
@@ -391,6 +434,12 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
+function optionalNullableString(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  if (value === undefined) return undefined;
+  return optionalString(value);
+}
+
 function optionalNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
@@ -536,6 +585,113 @@ function parseCancelAgentRequest(context: ParseContext): SessionRequest {
   return { type: "cancel_agent_request", requestId: context.requestId, agentId };
 }
 
+function parseSetAgentModelRequest(context: ParseContext): SessionRequest {
+  const requestId = context.requireRequestId();
+  const agentId = context.requireField("agentId");
+  const rawModelId = context.message.modelId;
+  const modelId = rawModelId === null ? null : optionalString(rawModelId);
+  if (!requestId || !agentId || (rawModelId !== null && !modelId)) {
+    return context.reject(
+      "invalid_request",
+      "set_agent_model_request requires requestId, agentId, and modelId",
+    );
+  }
+  return {
+    type: "set_agent_model_request",
+    requestId,
+    agentId,
+    modelId: rawModelId === null ? null : modelId!,
+  };
+}
+
+function parseProvidersSnapshotRequest(context: ParseContext): SessionRequest {
+  const requestId = context.requireRequestId();
+  if (!requestId) {
+    return context.reject("invalid_request", `${context.originalType} requires requestId`);
+  }
+  if (context.originalType === "refresh_providers_snapshot_request") {
+    return {
+      type: "refresh_providers_snapshot_request",
+      requestId,
+      cwd: optionalString(context.message.cwd),
+      providers: Array.isArray(context.message.providers)
+        ? context.message.providers.filter((value): value is string => typeof value === "string")
+        : undefined,
+    };
+  }
+  return {
+    type: "get_providers_snapshot_request",
+    requestId,
+    cwd: optionalString(context.message.cwd),
+  };
+}
+
+function parseXcodexRuntimeCatalogRequest(context: ParseContext): SessionRequest {
+  const requestId = context.requireRequestId();
+  const agentId = context.requireField("agentId");
+  if (!requestId || !agentId) {
+    return context.reject(
+      "invalid_request",
+      "xcodex_runtime_catalog_request requires requestId and agentId",
+    );
+  }
+  return {
+    type: "xcodex_runtime_catalog_request",
+    requestId,
+    agentId,
+    includeModels:
+      typeof context.message.includeModels === "boolean" ? context.message.includeModels : true,
+  };
+}
+
+function parseXcodexThreadRuntimeSetRequest(context: ParseContext): SessionRequest {
+  const requestId = context.requireRequestId();
+  const agentId = context.requireField("agentId");
+  const providerId = context.requireField("providerId");
+  const supplierId = context.requireField("supplierId");
+  const rawModelId = context.message.modelId;
+  const rawRealProviderOverride = context.message.realProviderOverride;
+  const expectedUpdatedAtMs =
+    typeof context.message.expectedUpdatedAtMs === "number"
+      ? context.message.expectedUpdatedAtMs
+      : undefined;
+  const modelId = optionalNullableString(rawModelId);
+  const realProviderOverride = optionalNullableString(rawRealProviderOverride);
+  if (!requestId || !agentId || !providerId || !supplierId) {
+    return context.reject(
+      "invalid_request",
+      "xcodex_thread_runtime_set_request requires requestId, agentId, providerId, and supplierId",
+    );
+  }
+  if ((rawModelId !== null && rawModelId !== undefined && !modelId) || modelId === "") {
+    return context.reject(
+      "invalid_request",
+      "xcodex_thread_runtime_set_request modelId is invalid",
+    );
+  }
+  if (
+    (rawRealProviderOverride !== null &&
+      rawRealProviderOverride !== undefined &&
+      !realProviderOverride) ||
+    realProviderOverride === ""
+  ) {
+    return context.reject(
+      "invalid_request",
+      "xcodex_thread_runtime_set_request realProviderOverride is invalid",
+    );
+  }
+  return {
+    type: "xcodex_thread_runtime_set_request",
+    requestId,
+    agentId,
+    providerId,
+    supplierId,
+    modelId,
+    realProviderOverride,
+    expectedUpdatedAtMs,
+  };
+}
+
 function parseFileExplorerRequest(context: ParseContext): SessionRequest {
   const requestId = context.requireRequestId();
   const cwd = context.requireField("cwd");
@@ -588,6 +744,11 @@ const sessionRequestParsers: Record<string, (context: ParseContext) => SessionRe
   fetch_agent_timeline_request: parseTimelineRequest,
   send_agent_message_request: parseSendMessageRequest,
   cancel_agent_request: parseCancelAgentRequest,
+  set_agent_model_request: parseSetAgentModelRequest,
+  get_providers_snapshot_request: parseProvidersSnapshotRequest,
+  refresh_providers_snapshot_request: parseProvidersSnapshotRequest,
+  xcodex_runtime_catalog_request: parseXcodexRuntimeCatalogRequest,
+  xcodex_thread_runtime_set_request: parseXcodexThreadRuntimeSetRequest,
   file_explorer_request: parseFileExplorerRequest,
   project_icon_request: parseProjectIconRequest,
   client_heartbeat: () => ({ type: "client_heartbeat" }),
@@ -881,7 +1042,9 @@ class ClientSession {
         hostname: hostname(),
         version: CONNECTOR_VERSION,
         features: {
-          providersSnapshot: false,
+          providersSnapshot: true,
+          xcodexRuntimeCatalog: true,
+          xcodexThreadRuntimeSwitching: true,
           checkoutGithubSetAutoMerge: false,
         },
         xcodexConnector: {
@@ -893,69 +1056,101 @@ class ClientSession {
 
   private async handleSessionMessage(message: SessionRequest) {
     try {
-      switch (message.type) {
-        case "rejected_request":
-          this.sendRpcError(message, message.code, message.error);
-          return;
-        case "ping":
-          this.sendSession({
-            type: "pong",
-            payload: {
-              requestId: message.requestId,
-              clientSentAt: message.clientSentAt,
-              serverReceivedAt: Date.now(),
-              serverSentAt: Date.now(),
-            },
-          });
-          return;
-        case "fetch_agents_request":
-        case "fetch_agent_history_request":
-          await this.handleFetchAgents(message);
-          return;
-        case "fetch_agent_request":
-          await this.handleFetchAgent(message);
-          return;
-        case "fetch_workspaces_request":
-          await this.handleFetchWorkspaces(message);
-          return;
-        case "fetch_agent_timeline_request":
-          await this.handleFetchTimeline(message);
-          return;
-        case "send_agent_message_request":
-          await this.handleSendMessage(message);
-          return;
-        case "cancel_agent_request":
-          await this.handleCancelAgent(message);
-          return;
-        case "file_explorer_request":
-          await this.handleFileExplorer(message);
-          return;
-        case "project_icon_request":
-          await this.handleProjectIcon(message);
-          return;
-        case "client_heartbeat":
-        case "register_push_token":
-        case "audio_played":
-          return;
-        case "set_voice_mode":
-          this.sendSession({
-            type: "set_voice_mode_response",
-            payload: {
-              requestId: message.requestId ?? `voice-${Date.now()}`,
-              enabled: false,
-              agentId: message.agentId ?? null,
-              accepted: false,
-              error: "Voice mode is not available through the xCodex mobile connector.",
-              reasonCode: "unsupported_connector_capability",
-              retryable: false,
-            },
-          });
-          return;
-      }
+      if (await this.handleCoreSessionMessage(message)) return;
+      if (await this.handleRuntimeSessionMessage(message)) return;
+      this.handleUnsupportedSessionMessage(message);
     } catch (error) {
       this.logger.error({ err: error, type: message.type }, "session_message_failed");
       this.sendRpcError(message, "request_failed", getErrorMessage(error));
     }
+  }
+
+  private async handleCoreSessionMessage(message: SessionRequest): Promise<boolean> {
+    switch (message.type) {
+      case "rejected_request":
+        this.sendRpcError(message, message.code, message.error);
+        return true;
+      case "ping":
+        this.sendSession({
+          type: "pong",
+          payload: {
+            requestId: message.requestId,
+            clientSentAt: message.clientSentAt,
+            serverReceivedAt: Date.now(),
+            serverSentAt: Date.now(),
+          },
+        });
+        return true;
+      case "fetch_agents_request":
+      case "fetch_agent_history_request":
+        await this.handleFetchAgents(message);
+        return true;
+      case "fetch_agent_request":
+        await this.handleFetchAgent(message);
+        return true;
+      case "fetch_workspaces_request":
+        await this.handleFetchWorkspaces(message);
+        return true;
+      case "fetch_agent_timeline_request":
+        await this.handleFetchTimeline(message);
+        return true;
+      case "send_agent_message_request":
+        await this.handleSendMessage(message);
+        return true;
+      case "cancel_agent_request":
+        await this.handleCancelAgent(message);
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private async handleRuntimeSessionMessage(message: SessionRequest): Promise<boolean> {
+    switch (message.type) {
+      case "set_agent_model_request":
+        await this.handleSetAgentModel(message);
+        return true;
+      case "get_providers_snapshot_request":
+        await this.handleGetProvidersSnapshot(message);
+        return true;
+      case "refresh_providers_snapshot_request":
+        await this.handleRefreshProvidersSnapshot(message);
+        return true;
+      case "xcodex_runtime_catalog_request":
+        await this.handleXcodexRuntimeCatalog(message);
+        return true;
+      case "xcodex_thread_runtime_set_request":
+        await this.handleXcodexThreadRuntimeSet(message);
+        return true;
+      case "file_explorer_request":
+        await this.handleFileExplorer(message);
+        return true;
+      case "project_icon_request":
+        await this.handleProjectIcon(message);
+        return true;
+      case "client_heartbeat":
+      case "register_push_token":
+      case "audio_played":
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private handleUnsupportedSessionMessage(message: SessionRequest) {
+    if (message.type !== "set_voice_mode") return;
+    this.sendSession({
+      type: "set_voice_mode_response",
+      payload: {
+        requestId: message.requestId ?? `voice-${Date.now()}`,
+        enabled: false,
+        agentId: message.agentId ?? null,
+        accepted: false,
+        error: "Voice mode is not available through the xCodex mobile connector.",
+        reasonCode: "unsupported_connector_capability",
+        retryable: false,
+      },
+    });
   }
 
   private async handleFetchAgents(request: FetchAgentsRequest) {
@@ -1128,6 +1323,187 @@ class ClientSession {
     });
   }
 
+  private async handleSetAgentModel(request: SetAgentModelRequest) {
+    try {
+      const route = await this.bridge.getThreadRuntime(request.agentId);
+      if (!route?.providerId || !route.supplierId) {
+        throw new Error("xCodex thread runtime route is not selectable");
+      }
+      const result = await this.bridge.setThreadRuntime({
+        agentId: request.agentId,
+        providerId: route.providerId,
+        supplierId: route.supplierId,
+        modelId: request.modelId,
+        realProviderOverride: route.realProviderOverride ?? null,
+        expectedUpdatedAtMs: route.updatedAtMs,
+      });
+      this.sendSession({
+        type: "set_agent_model_response",
+        payload: {
+          requestId: request.requestId,
+          agentId: request.agentId,
+          accepted: result.accepted,
+          error: null,
+        },
+      });
+      const agent =
+        (result.agent as AgentSnapshot | null) ??
+        ((await this.bridge.getAgentPayloadById(request.agentId)) as AgentSnapshot | null);
+      if (agent) {
+        this.sendAgentUpsert(agent);
+      }
+      this.sendSession({
+        type: "xcodex_thread_runtime_update",
+        payload: {
+          agentId: request.agentId,
+          route: result.route,
+        },
+      });
+      void this.forwardWorkspaceUpdate(route.workspaceId);
+    } catch (error) {
+      this.sendSession({
+        type: "set_agent_model_response",
+        payload: {
+          requestId: request.requestId,
+          agentId: request.agentId,
+          accepted: false,
+          error: getErrorMessage(error),
+        },
+      });
+    }
+  }
+
+  private async handleGetProvidersSnapshot(request: ProvidersSnapshotRequest) {
+    this.sendSession({
+      type: "get_providers_snapshot_response",
+      payload: {
+        entries: await this.buildProvidersSnapshotEntries(),
+        generatedAt: new Date().toISOString(),
+        requestId: request.requestId,
+      },
+    });
+  }
+
+  private async handleRefreshProvidersSnapshot(request: RefreshProvidersSnapshotRequest) {
+    this.sendSession({
+      type: "refresh_providers_snapshot_response",
+      payload: {
+        requestId: request.requestId,
+        acknowledged: true,
+      },
+    });
+    this.sendSession({
+      type: "providers_snapshot_update",
+      payload: {
+        cwd: request.cwd,
+        entries: await this.buildProvidersSnapshotEntries(),
+        generatedAt: new Date().toISOString(),
+      },
+    });
+  }
+
+  private async handleXcodexRuntimeCatalog(request: XcodexRuntimeCatalogRequest) {
+    try {
+      const catalog = await this.bridge.runtimeCatalog({
+        agentId: request.agentId,
+        includeModels: request.includeModels ?? true,
+      });
+      this.sendSession({
+        type: "xcodex_runtime_catalog_response",
+        payload: {
+          requestId: request.requestId,
+          agentId: request.agentId,
+          catalog,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.sendSession({
+        type: "xcodex_runtime_catalog_response",
+        payload: {
+          requestId: request.requestId,
+          agentId: request.agentId,
+          catalog: null,
+          error: getErrorMessage(error),
+        },
+      });
+    }
+  }
+
+  private async handleXcodexThreadRuntimeSet(request: XcodexThreadRuntimeSetRequest) {
+    try {
+      const result = await this.bridge.setThreadRuntime({
+        agentId: request.agentId,
+        providerId: request.providerId,
+        supplierId: request.supplierId,
+        modelId: request.modelId,
+        realProviderOverride: request.realProviderOverride,
+        expectedUpdatedAtMs: request.expectedUpdatedAtMs,
+      });
+      this.sendSession({
+        type: "xcodex_thread_runtime_set_response",
+        payload: {
+          requestId: request.requestId,
+          agentId: request.agentId,
+          accepted: result.accepted,
+          route: result.route,
+          error: null,
+        },
+      });
+      if (result.agent) {
+        this.sendAgentUpsert(result.agent as AgentSnapshot);
+      }
+      this.sendSession({
+        type: "xcodex_thread_runtime_update",
+        payload: {
+          agentId: request.agentId,
+          route: result.route,
+        },
+      });
+      void this.forwardWorkspaceUpdate(result.route.workspaceId);
+    } catch (error) {
+      this.sendSession({
+        type: "xcodex_thread_runtime_set_response",
+        payload: {
+          requestId: request.requestId,
+          agentId: request.agentId,
+          accepted: false,
+          route: null,
+          error: getErrorMessage(error),
+        },
+      });
+    }
+  }
+
+  private async buildProvidersSnapshotEntries() {
+    const catalog = await this.bridge.runtimeCatalog({ includeModels: false });
+    if (!catalog) {
+      return [
+        {
+          provider: "xcodex",
+          status: "error",
+          enabled: true,
+          label: "xCodex",
+          description: "Remote control for xCodex desktop threads",
+          models: [],
+          fetchedAt: new Date().toISOString(),
+          error: "xCodex runtime catalog is unavailable",
+        },
+      ];
+    }
+    return [
+      {
+        provider: "xcodex",
+        status: "ready",
+        enabled: true,
+        label: "xCodex",
+        description: "Remote control for xCodex desktop threads",
+        models: [],
+        fetchedAt: new Date(catalog.generatedAtMs).toISOString(),
+      },
+    ];
+  }
+
   private async handleFileExplorer(request: FileExplorerRequest) {
     const requestedPath = request.path ?? ".";
     try {
@@ -1217,10 +1593,16 @@ class ClientSession {
       this.sendSession({ type: "agent_update", payload: { kind: "remove", agentId } });
       return;
     }
+    this.sendAgentUpsert(agent);
+  }
+
+  private sendAgentUpsert(agent: AgentSnapshot) {
     const project = this.bridge.buildProjectPlacement(agent as never) as ProjectPlacement;
-    const payload = matchesAgentFilter(agent, project, this.agentSubscription.request.filter)
-      ? { kind: "upsert", agent, project }
-      : { kind: "remove", agentId };
+    const payload =
+      !this.agentSubscription ||
+      matchesAgentFilter(agent, project, this.agentSubscription.request.filter)
+        ? { kind: "upsert", agent, project }
+        : { kind: "remove", agentId: agent.id };
     this.sendSession({ type: "agent_update", payload });
   }
 

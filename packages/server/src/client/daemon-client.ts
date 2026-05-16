@@ -59,6 +59,8 @@ import type {
   ListAvailableProvidersResponse,
   GetProvidersSnapshotResponseMessage,
   RefreshProvidersSnapshotResponseMessage,
+  XcodexRuntimeCatalogResponseMessage,
+  XcodexThreadRuntimeSetResponseMessage,
   ProviderDiagnosticResponseMessage,
   ListTerminalsResponse,
   CreateTerminalResponse,
@@ -203,6 +205,11 @@ export type DaemonEvent =
       type: "providers_snapshot_update";
       payload: Extract<SessionOutboundMessage, { type: "providers_snapshot_update" }>["payload"];
     }
+  | {
+      type: "xcodex_thread_runtime_update";
+      agentId: string;
+      payload: Extract<SessionOutboundMessage, { type: "xcodex_thread_runtime_update" }>["payload"];
+    }
   | { type: "error"; message: string };
 
 export type DaemonEventHandler = (event: DaemonEvent) => void;
@@ -316,6 +323,8 @@ type ListProviderModesPayload = ListProviderModesResponseMessage["payload"];
 type ListAvailableProvidersPayload = ListAvailableProvidersResponse["payload"];
 type GetProvidersSnapshotPayload = GetProvidersSnapshotResponseMessage["payload"];
 type RefreshProvidersSnapshotPayload = RefreshProvidersSnapshotResponseMessage["payload"];
+type XcodexRuntimeCatalogPayload = XcodexRuntimeCatalogResponseMessage["payload"];
+type XcodexThreadRuntimeSetPayload = XcodexThreadRuntimeSetResponseMessage["payload"];
 type ProviderDiagnosticPayload = ProviderDiagnosticResponseMessage["payload"];
 type ReadProjectConfigPayload = Extract<
   SessionOutboundMessage,
@@ -2224,6 +2233,55 @@ export class DaemonClient {
     if (!payload.accepted) {
       throw new Error(payload.error ?? "setAgentModel rejected");
     }
+  }
+
+  async getXcodexRuntimeCatalog(
+    agentId: string,
+    options?: { includeModels?: boolean; requestId?: string },
+  ): Promise<NonNullable<XcodexRuntimeCatalogPayload["catalog"]>> {
+    const payload = await this.sendCorrelatedSessionRequest({
+      requestId: options?.requestId,
+      message: {
+        type: "xcodex_runtime_catalog_request",
+        agentId,
+        includeModels: options?.includeModels,
+      },
+      responseType: "xcodex_runtime_catalog_response",
+      timeout: 10000,
+    });
+    if (payload.error || !payload.catalog) {
+      throw new Error(payload.error ?? "xCodex runtime catalog is unavailable");
+    }
+    return payload.catalog;
+  }
+
+  async setXcodexThreadRuntime(input: {
+    agentId: string;
+    providerId: string;
+    supplierId: string;
+    modelId?: string | null;
+    realProviderOverride?: string | null;
+    expectedUpdatedAtMs?: number;
+    requestId?: string;
+  }): Promise<XcodexThreadRuntimeSetPayload> {
+    const payload = await this.sendCorrelatedSessionRequest({
+      requestId: input.requestId,
+      message: {
+        type: "xcodex_thread_runtime_set_request",
+        agentId: input.agentId,
+        providerId: input.providerId,
+        supplierId: input.supplierId,
+        modelId: input.modelId,
+        realProviderOverride: input.realProviderOverride,
+        expectedUpdatedAtMs: input.expectedUpdatedAtMs,
+      },
+      responseType: "xcodex_thread_runtime_set_response",
+      timeout: 30000,
+    });
+    if (!payload.accepted) {
+      throw new Error(payload.error ?? "xCodex runtime switch rejected");
+    }
+    return payload;
   }
 
   async setAgentFeature(agentId: string, featureId: string, value: unknown): Promise<void> {
@@ -4514,6 +4572,12 @@ export class DaemonClient {
       case "providers_snapshot_update":
         return {
           type: "providers_snapshot_update",
+          payload: msg.payload,
+        };
+      case "xcodex_thread_runtime_update":
+        return {
+          type: "xcodex_thread_runtime_update",
+          agentId: msg.payload.agentId,
           payload: msg.payload,
         };
       default:

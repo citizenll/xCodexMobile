@@ -223,6 +223,57 @@ export const ProviderSnapshotEntrySchema = z.object({
   defaultModeId: z.string().nullable().optional(),
 });
 
+export const XcodexRuntimeRouteSchema = z.object({
+  workspaceId: z.string().min(1),
+  threadId: z.string().min(1),
+  providerId: z.string().nullable().optional(),
+  supplierId: z.string().nullable().optional(),
+  sessionProfileId: z.string().nullable().optional(),
+  modelId: z.string().nullable().optional(),
+  realProviderOverride: z.string().nullable().optional(),
+  updatedAtMs: z.number().int().nonnegative(),
+  canSwitchNow: z.boolean(),
+  blockingReason: z.string().nullable().optional(),
+});
+
+export const XcodexRuntimeProviderSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  description: z.string().nullable().optional(),
+  defaultSupplierId: z.string().nullable().optional(),
+  supportsSupplierSwitching: z.boolean().optional(),
+});
+
+export const XcodexRuntimeSupplierSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  wireApi: z.string(),
+  endpointLabel: z.string().nullable().optional(),
+  configured: z.boolean().optional(),
+  capability: z.string().optional(),
+  inputModalities: z.array(z.string()).optional(),
+  contextWindow: z.number().int().positive().nullable().optional(),
+});
+
+export const XcodexRuntimeModelSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  providerId: z.string().min(1),
+  supplierId: z.string().min(1),
+  contextWindow: z.number().int().positive().nullable().optional(),
+  inputModalities: z.array(z.string()).optional(),
+  supportsFastServiceTier: z.boolean().optional(),
+  disabledReason: z.string().nullable().optional(),
+});
+
+export const XcodexRuntimeCatalogSchema = z.object({
+  generatedAtMs: z.number().int().nonnegative(),
+  providers: z.array(XcodexRuntimeProviderSchema),
+  suppliers: z.array(XcodexRuntimeSupplierSchema),
+  route: XcodexRuntimeRouteSchema.nullable().optional(),
+  models: z.array(XcodexRuntimeModelSchema).optional(),
+});
+
 const AgentCapabilityFlagsSchema: z.ZodType<AgentCapabilityFlags> = z.object({
   supportsStreaming: z.boolean(),
   supportsSessionPersistence: z.boolean(),
@@ -1188,6 +1239,53 @@ export const SetAgentModelResponseMessageSchema = z.object({
   payload: AgentActionResponsePayloadSchema,
 });
 
+export const XcodexRuntimeCatalogRequestMessageSchema = z.object({
+  type: z.literal("xcodex_runtime_catalog_request"),
+  agentId: z.string(),
+  includeModels: z.boolean().optional(),
+  requestId: z.string(),
+});
+
+export const XcodexRuntimeCatalogResponseMessageSchema = z.object({
+  type: z.literal("xcodex_runtime_catalog_response"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    catalog: XcodexRuntimeCatalogSchema.nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const XcodexThreadRuntimeSetRequestMessageSchema = z.object({
+  type: z.literal("xcodex_thread_runtime_set_request"),
+  agentId: z.string(),
+  providerId: z.string(),
+  supplierId: z.string(),
+  modelId: z.string().nullable().optional(),
+  realProviderOverride: z.string().nullable().optional(),
+  expectedUpdatedAtMs: z.number().int().nonnegative().optional(),
+  requestId: z.string(),
+});
+
+export const XcodexThreadRuntimeSetResponseMessageSchema = z.object({
+  type: z.literal("xcodex_thread_runtime_set_response"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    accepted: z.boolean(),
+    route: XcodexRuntimeRouteSchema.nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const XcodexThreadRuntimeUpdateMessageSchema = z.object({
+  type: z.literal("xcodex_thread_runtime_update"),
+  payload: z.object({
+    agentId: z.string(),
+    route: XcodexRuntimeRouteSchema,
+  }),
+});
+
 export const SetAgentThinkingRequestMessageSchema = z.object({
   type: z.literal("set_agent_thinking_request"),
   agentId: z.string(),
@@ -1788,6 +1886,8 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   FetchAgentTimelineRequestMessageSchema,
   SetAgentModeRequestMessageSchema,
   SetAgentModelRequestMessageSchema,
+  XcodexRuntimeCatalogRequestMessageSchema,
+  XcodexThreadRuntimeSetRequestMessageSchema,
   SetAgentThinkingRequestMessageSchema,
   SetAgentFeatureRequestMessageSchema,
   AgentPermissionResponseMessageSchema,
@@ -2024,6 +2124,8 @@ export const ServerInfoStatusPayloadSchema = z
     features: z
       .object({
         providersSnapshot: z.boolean().optional(),
+        xcodexRuntimeCatalog: z.boolean().optional(),
+        xcodexThreadRuntimeSwitching: z.boolean().optional(),
         checkoutGithubSetAutoMerge: z.boolean().optional(),
       })
       .optional(),
@@ -3486,6 +3588,9 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   WriteProjectConfigResponseMessageSchema,
   SetAgentModeResponseMessageSchema,
   SetAgentModelResponseMessageSchema,
+  XcodexRuntimeCatalogResponseMessageSchema,
+  XcodexThreadRuntimeSetResponseMessageSchema,
+  XcodexThreadRuntimeUpdateMessageSchema,
   SetAgentThinkingResponseMessageSchema,
   SetAgentFeatureResponseMessageSchema,
   UpdateAgentResponseMessageSchema,
@@ -3623,6 +3728,20 @@ export type SendAgentMessageResponseMessage = z.infer<typeof SendAgentMessageRes
 export type SetVoiceModeResponseMessage = z.infer<typeof SetVoiceModeResponseMessageSchema>;
 export type SetAgentModeResponseMessage = z.infer<typeof SetAgentModeResponseMessageSchema>;
 export type SetAgentModelResponseMessage = z.infer<typeof SetAgentModelResponseMessageSchema>;
+export type XcodexRuntimeRoute = z.infer<typeof XcodexRuntimeRouteSchema>;
+export type XcodexRuntimeProvider = z.infer<typeof XcodexRuntimeProviderSchema>;
+export type XcodexRuntimeSupplier = z.infer<typeof XcodexRuntimeSupplierSchema>;
+export type XcodexRuntimeModel = z.infer<typeof XcodexRuntimeModelSchema>;
+export type XcodexRuntimeCatalog = z.infer<typeof XcodexRuntimeCatalogSchema>;
+export type XcodexRuntimeCatalogResponseMessage = z.infer<
+  typeof XcodexRuntimeCatalogResponseMessageSchema
+>;
+export type XcodexThreadRuntimeSetResponseMessage = z.infer<
+  typeof XcodexThreadRuntimeSetResponseMessageSchema
+>;
+export type XcodexThreadRuntimeUpdateMessage = z.infer<
+  typeof XcodexThreadRuntimeUpdateMessageSchema
+>;
 export type SetAgentThinkingResponseMessage = z.infer<typeof SetAgentThinkingResponseMessageSchema>;
 export type SetAgentFeatureResponseMessage = z.infer<typeof SetAgentFeatureResponseMessageSchema>;
 export type UpdateAgentResponseMessage = z.infer<typeof UpdateAgentResponseMessageSchema>;
@@ -3742,6 +3861,12 @@ export type UpdateAgentRequestMessage = z.infer<typeof UpdateAgentRequestMessage
 export type ProjectRenameRequest = z.infer<typeof ProjectRenameRequestSchema>;
 export type SetAgentModeRequestMessage = z.infer<typeof SetAgentModeRequestMessageSchema>;
 export type SetAgentModelRequestMessage = z.infer<typeof SetAgentModelRequestMessageSchema>;
+export type XcodexRuntimeCatalogRequestMessage = z.infer<
+  typeof XcodexRuntimeCatalogRequestMessageSchema
+>;
+export type XcodexThreadRuntimeSetRequestMessage = z.infer<
+  typeof XcodexThreadRuntimeSetRequestMessageSchema
+>;
 export type SetAgentThinkingRequestMessage = z.infer<typeof SetAgentThinkingRequestMessageSchema>;
 export type SetAgentFeatureRequestMessage = z.infer<typeof SetAgentFeatureRequestMessageSchema>;
 export type AgentPermissionResponseMessage = z.infer<typeof AgentPermissionResponseMessageSchema>;

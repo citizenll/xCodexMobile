@@ -52,10 +52,69 @@ const HostBridgeAgentSchema = z.object({
   title: z.string().nullable().optional(),
   preview: z.string().nullable().optional(),
   modelProvider: z.string().nullable().optional(),
+  providerId: z.string().nullable().optional(),
+  supplierId: z.string().nullable().optional(),
+  sessionProfileId: z.string().nullable().optional(),
+  modelId: z.string().nullable().optional(),
+  realProviderOverride: z.string().nullable().optional(),
+  routeUpdatedAtMs: z.number().int().nonnegative().nullable().optional(),
+  canSwitchRuntime: z.boolean().optional(),
+  runtimeBlockingReason: z.string().nullable().optional(),
   createdAtMs: z.number().int().nonnegative(),
   updatedAtMs: z.number().int().nonnegative(),
   archivedAtMs: z.number().int().nonnegative().nullable().optional(),
   state: z.string(),
+});
+
+const HostBridgeRuntimeRouteSchema = z.object({
+  workspaceId: z.string().min(1),
+  threadId: z.string().min(1),
+  providerId: z.string().nullable().optional(),
+  supplierId: z.string().nullable().optional(),
+  sessionProfileId: z.string().nullable().optional(),
+  modelId: z.string().nullable().optional(),
+  realProviderOverride: z.string().nullable().optional(),
+  updatedAtMs: z.number().int().nonnegative(),
+  canSwitchNow: z.boolean(),
+  blockingReason: z.string().nullable().optional(),
+});
+
+const HostBridgeRuntimeModelSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  providerId: z.string().min(1),
+  supplierId: z.string().min(1),
+  contextWindow: z.number().int().positive().nullable().optional(),
+  inputModalities: z.array(z.string()).optional(),
+  supportsFastServiceTier: z.boolean().optional(),
+  disabledReason: z.string().nullable().optional(),
+});
+
+const HostBridgeRuntimeCatalogSchema = z.object({
+  generatedAtMs: z.number().int().nonnegative(),
+  providers: z.array(
+    z.object({
+      id: z.string().min(1),
+      label: z.string().min(1),
+      description: z.string().nullable().optional(),
+      defaultSupplierId: z.string().nullable().optional(),
+      supportsSupplierSwitching: z.boolean().optional(),
+    }),
+  ),
+  suppliers: z.array(
+    z.object({
+      id: z.string().min(1),
+      label: z.string().min(1),
+      wireApi: z.string(),
+      endpointLabel: z.string().nullable().optional(),
+      configured: z.boolean().optional(),
+      capability: z.string().optional(),
+      inputModalities: z.array(z.string()).optional(),
+      contextWindow: z.number().int().positive().nullable().optional(),
+    }),
+  ),
+  route: HostBridgeRuntimeRouteSchema.nullable().optional(),
+  models: z.array(HostBridgeRuntimeModelSchema).optional(),
 });
 
 const HostBridgeTimelineEntrySchema = z.object({
@@ -121,6 +180,8 @@ const HostBridgeV2EventSchema = z.object({
 type HostBridgeAgent = z.infer<typeof HostBridgeAgentSchema>;
 type HostBridgeTimeline = z.infer<typeof HostBridgeTimelineSchema>;
 type HostBridgeTimelineEntry = z.infer<typeof HostBridgeTimelineEntrySchema>;
+type HostBridgeRuntimeRoute = z.infer<typeof HostBridgeRuntimeRouteSchema>;
+type HostBridgeRuntimeCatalog = z.infer<typeof HostBridgeRuntimeCatalogSchema>;
 export type XcodexBridgeAppServerEvent = z.infer<typeof HostBridgeV2EventSchema>;
 type AgentTimelineEntryPayload = Extract<
   SessionOutboundMessage,
@@ -239,6 +300,25 @@ export interface XcodexBridgeClient {
     params: Pick<FileExplorerRequestMessage, "cwd" | "path" | "mode" | "acceptBinary">,
   ): Promise<Omit<FileExplorerResponsePayload, "requestId" | "error">>;
   projectIcon(cwd: string): Promise<Omit<ProjectIconResponsePayload, "requestId" | "error">>;
+  runtimeCatalog(params?: {
+    agentId?: string;
+    workspaceId?: string;
+    threadId?: string;
+    includeModels?: boolean;
+  }): Promise<HostBridgeRuntimeCatalog | null>;
+  getThreadRuntime(agentId: string): Promise<HostBridgeRuntimeRoute | null>;
+  setThreadRuntime(params: {
+    agentId: string;
+    providerId: string;
+    supplierId: string;
+    modelId?: string | null;
+    realProviderOverride?: string | null;
+    expectedUpdatedAtMs?: number;
+  }): Promise<{
+    accepted: boolean;
+    route: HostBridgeRuntimeRoute;
+    agent: AgentSnapshotPayload | null;
+  }>;
 }
 
 function toIso(ms: number): string {
@@ -262,11 +342,13 @@ function capabilities(): AgentSnapshotPayload["capabilities"] {
 }
 
 function toAgentPayload(agent: HostBridgeAgent): AgentSnapshotPayload {
+  const model = agent.modelId ?? agent.modelProvider ?? "xCodex";
+  const canSwitchRuntime = agent.canSwitchRuntime !== false;
   return {
     id: agent.id,
     provider: XCODEX_AGENT_PROVIDER,
     cwd: agent.cwd,
-    model: agent.modelProvider ?? "xCodex",
+    model,
     createdAt: toIso(agent.createdAtMs),
     updatedAt: toIso(agent.updatedAtMs),
     lastUserMessageAt: null,
@@ -287,11 +369,20 @@ function toAgentPayload(agent: HostBridgeAgent): AgentSnapshotPayload {
     runtimeInfo: {
       provider: XCODEX_AGENT_PROVIDER,
       sessionId: agent.threadId,
-      model: agent.modelProvider ?? null,
+      model,
       extra: {
         xcodex: true,
         workspaceId: agent.workspaceId,
         workspaceName: agent.workspaceName,
+        threadId: agent.threadId,
+        providerId: agent.providerId ?? null,
+        supplierId: agent.supplierId ?? null,
+        sessionProfileId: agent.sessionProfileId ?? null,
+        modelId: agent.modelId ?? null,
+        realProviderOverride: agent.realProviderOverride ?? null,
+        routeUpdatedAtMs: agent.routeUpdatedAtMs ?? null,
+        canSwitchRuntime,
+        runtimeBlockingReason: agent.runtimeBlockingReason ?? null,
         readOnly: false,
       },
     },
@@ -301,6 +392,10 @@ function toAgentPayload(agent: HostBridgeAgent): AgentSnapshotPayload {
       "xcodex.workspaceId": agent.workspaceId,
       "xcodex.workspaceName": agent.workspaceName,
       "xcodex.threadId": agent.threadId,
+      "xcodex.providerId": agent.providerId ?? "",
+      "xcodex.supplierId": agent.supplierId ?? "",
+      "xcodex.modelId": agent.modelId ?? "",
+      "xcodex.canSwitchRuntime": String(canSwitchRuntime),
       "xcodex.readOnly": "false",
     },
     archivedAt: agent.archivedAtMs ? toIso(agent.archivedAtMs) : null,
@@ -934,6 +1029,62 @@ export function createXcodexBridgeClient(options: {
           reason: z.string().nullable().optional(),
         })
         .parse(data);
+    },
+    async runtimeCatalog(params = {}) {
+      const data = await tryRequest("runtime.catalog", async () =>
+        requestV2("runtime.catalog", {
+          ...(params.agentId ? { agentId: params.agentId } : {}),
+          ...(params.workspaceId ? { workspaceId: params.workspaceId } : {}),
+          ...(params.threadId ? { threadId: params.threadId } : {}),
+          ...(typeof params.includeModels === "boolean"
+            ? { includeModels: params.includeModels }
+            : {}),
+        }),
+      );
+      return data ? HostBridgeRuntimeCatalogSchema.parse(data) : null;
+    },
+    async getThreadRuntime(agentId) {
+      if (!agentId.startsWith(XCODEX_AGENT_PREFIX)) {
+        throw new Error(`Not an xCodex virtual agent: ${agentId}`);
+      }
+      const data = await tryRequest("thread.runtime.get", async () =>
+        requestV2("thread.runtime.get", { agentId }),
+      );
+      if (!data) return null;
+      const parsed = z.object({ route: HostBridgeRuntimeRouteSchema }).parse(data);
+      return parsed.route;
+    },
+    async setThreadRuntime({
+      agentId,
+      providerId,
+      supplierId,
+      modelId,
+      realProviderOverride,
+      expectedUpdatedAtMs,
+    }) {
+      if (!agentId.startsWith(XCODEX_AGENT_PREFIX)) {
+        throw new Error(`Not an xCodex virtual agent: ${agentId}`);
+      }
+      const data = await requestV2("thread.runtime.set", {
+        agentId,
+        providerId,
+        supplierId,
+        ...(modelId === undefined ? {} : { modelId }),
+        ...(realProviderOverride === undefined ? {} : { realProviderOverride }),
+        ...(typeof expectedUpdatedAtMs === "number" ? { expectedUpdatedAtMs } : {}),
+      });
+      const parsed = z
+        .object({
+          accepted: z.boolean(),
+          route: HostBridgeRuntimeRouteSchema,
+          agent: HostBridgeAgentSchema.nullable().optional(),
+        })
+        .parse(data);
+      return {
+        accepted: parsed.accepted,
+        route: parsed.route,
+        agent: parsed.agent ? toAgentPayload(parsed.agent) : null,
+      };
     },
     async fileExplorer({ cwd, path: explorerPath, mode, acceptBinary }) {
       const data = await requestV2("file.explorer", {

@@ -5,6 +5,7 @@
     "moduleResolution": "NodeNext",
     "lib": ["ES2023", "DOM"],
     "paths": {
+      "@getpaseo/highlight": ["../highlight/src/index.ts"],
       "@server/*": ["./src/*"]
     },
     "skipLibCheck": true,

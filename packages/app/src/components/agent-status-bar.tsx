@@ -50,6 +50,7 @@ import {
 import { Combobox, ComboboxItem, type ComboboxOption } from "@/components/ui/combobox";
 import { AdaptiveModalSheet } from "@/components/adaptive-modal-sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { XcodexRuntimeSelector } from "@/components/xcodex-runtime-selector";
 import type {
   AgentFeature,
   AgentMode,
@@ -223,7 +224,7 @@ function resolveHasAnyControl({
 }
 
 function isReadOnlyXcodexAgent(agent: AgentStatusBarSlice): boolean {
-  return agent?.provider === "xcodex";
+  return agent?.provider === "xcodex" && agent.canSwitchRuntime === false;
 }
 
 function toComboboxOptions(options: StatusOption[] | undefined): ComboboxOption[] {
@@ -346,6 +347,7 @@ type AgentStatusBarSlice = {
   features: AgentFeature[] | undefined;
   thinkingOptionId: string | null | undefined;
   lastUsage: unknown;
+  canSwitchRuntime: boolean | undefined;
 } | null;
 
 function selectAgentStatusBarSlice(
@@ -366,6 +368,13 @@ function selectAgentStatusBarSlice(
     features: currentAgent.features,
     thinkingOptionId: currentAgent.thinkingOptionId,
     lastUsage: currentAgent.lastUsage,
+    canSwitchRuntime:
+      typeof currentAgent.runtimeInfo?.extra === "object" &&
+      currentAgent.runtimeInfo.extra !== null &&
+      "canSwitchRuntime" in currentAgent.runtimeInfo.extra &&
+      typeof currentAgent.runtimeInfo.extra.canSwitchRuntime === "boolean"
+        ? currentAgent.runtimeInfo.extra.canSwitchRuntime
+        : undefined,
   };
 }
 
@@ -1905,6 +1914,19 @@ export const AgentStatusBar = memo(function AgentStatusBar({
 
   if (!agent) {
     return null;
+  }
+
+  if (agent.provider === "xcodex" && agent.canSwitchRuntime !== false) {
+    return (
+      <View style={styles.container}>
+        <XcodexRuntimeSelector
+          agentId={agentId}
+          client={client}
+          displayModel={agent.runtimeModelId ?? agent.model ?? "xCodex"}
+          disabled={!client}
+        />
+      </View>
+    );
   }
 
   return (

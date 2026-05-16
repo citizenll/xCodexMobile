@@ -4,6 +4,7 @@
     "strict": true,
     "paths": {
       "@/*": ["./src/*"],
+      "@getpaseo/highlight": ["../highlight/src/index.ts"],
       "@server/*": ["../server/src/*"]
     }
   },
