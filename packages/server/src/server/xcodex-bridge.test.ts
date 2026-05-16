@@ -167,6 +167,51 @@ test("projects xCodex host bridge agents and timeline into Paseo payloads", asyn
             },
           }) + "\n",
         );
+        return;
+      }
+      if (request.kind === "file.explorer") {
+        socket.end(
+          JSON.stringify({
+            kind: "response",
+            id: request.id,
+            ok: true,
+            data: {
+              cwd: request.payload.cwd,
+              path: "src",
+              mode: "list",
+              directory: {
+                path: "src",
+                entries: [
+                  {
+                    name: "index.ts",
+                    path: "src/index.ts",
+                    kind: "file",
+                    size: 12,
+                    modifiedAt: "2026-05-16T00:00:00.000Z",
+                  },
+                ],
+              },
+              file: null,
+            },
+          }) + "\n",
+        );
+        return;
+      }
+      if (request.kind === "project.icon") {
+        socket.end(
+          JSON.stringify({
+            kind: "response",
+            id: request.id,
+            ok: true,
+            data: {
+              cwd: request.payload.cwd,
+              icon: {
+                data: "aWNvbg==",
+                mimeType: "image/png",
+              },
+            },
+          }) + "\n",
+        );
       }
     });
   });
@@ -272,6 +317,28 @@ test("projects xCodex host bridge agents and timeline into Paseo payloads", asyn
       accepted: true,
       turnId: "turn-1",
     });
+    await expect(
+      bridge.fileExplorer({
+        cwd: "D:\\Dev\\self\\x-codex-worktree",
+        path: "src",
+        mode: "list",
+      }),
+    ).resolves.toMatchObject({
+      cwd: "D:\\Dev\\self\\x-codex-worktree",
+      path: "src",
+      mode: "list",
+      directory: {
+        entries: [{ name: "index.ts", path: "src/index.ts", kind: "file" }],
+      },
+      file: null,
+    });
+    await expect(bridge.projectIcon("D:\\Dev\\self\\x-codex-worktree")).resolves.toMatchObject({
+      cwd: "D:\\Dev\\self\\x-codex-worktree",
+      icon: {
+        data: "aWNvbg==",
+        mimeType: "image/png",
+      },
+    });
     expect(requests).toContainEqual(
       expect.objectContaining({
         kind: "message.send",
@@ -286,6 +353,24 @@ test("projects xCodex host bridge agents and timeline into Paseo payloads", asyn
       expect.objectContaining({
         kind: "turn.interrupt",
         payload: { agentId: "xcodex:workspace-1:thread-1" },
+      }),
+    );
+    expect(requests).toContainEqual(
+      expect.objectContaining({
+        kind: "file.explorer",
+        payload: {
+          cwd: "D:\\Dev\\self\\x-codex-worktree",
+          path: "src",
+          mode: "list",
+        },
+      }),
+    );
+    expect(requests).toContainEqual(
+      expect.objectContaining({
+        kind: "project.icon",
+        payload: {
+          cwd: "D:\\Dev\\self\\x-codex-worktree",
+        },
       }),
     );
   } finally {

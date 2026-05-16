@@ -144,6 +144,15 @@ type FetchWorkspacesResponsePayload = Extract<
 >["payload"];
 type FetchWorkspacesResponseEntry = FetchWorkspacesResponsePayload["entries"][number];
 type FetchWorkspacesResponsePageInfo = FetchWorkspacesResponsePayload["pageInfo"];
+type FileExplorerRequestMessage = Extract<SessionInboundMessage, { type: "file_explorer_request" }>;
+type FileExplorerResponsePayload = Extract<
+  SessionOutboundMessage,
+  { type: "file_explorer_response" }
+>["payload"];
+type ProjectIconResponsePayload = Extract<
+  SessionOutboundMessage,
+  { type: "project_icon_response" }
+>["payload"];
 
 const FETCH_WORKSPACES_SORT_KEYS = [
   "status_priority",
@@ -151,6 +160,47 @@ const FETCH_WORKSPACES_SORT_KEYS = [
   "name",
   "project_id",
 ] as const;
+
+const HostBridgeFileExplorerEntrySchema = z.object({
+  name: z.string(),
+  path: z.string(),
+  kind: z.enum(["file", "directory"]),
+  size: z.number(),
+  modifiedAt: z.string(),
+});
+
+const HostBridgeFileExplorerDirectorySchema = z.object({
+  path: z.string(),
+  entries: z.array(HostBridgeFileExplorerEntrySchema),
+});
+
+const HostBridgeFileExplorerFileSchema = z.object({
+  path: z.string(),
+  kind: z.enum(["text", "image", "binary"]),
+  encoding: z.enum(["utf-8", "base64", "none"]),
+  content: z.string().optional(),
+  mimeType: z.string().optional(),
+  size: z.number(),
+  modifiedAt: z.string(),
+});
+
+const HostBridgeFileExplorerPayloadSchema = z.object({
+  cwd: z.string(),
+  path: z.string(),
+  mode: z.enum(["list", "file"]),
+  directory: HostBridgeFileExplorerDirectorySchema.nullable(),
+  file: HostBridgeFileExplorerFileSchema.nullable(),
+});
+
+const HostBridgeProjectIconPayloadSchema = z.object({
+  cwd: z.string(),
+  icon: z
+    .object({
+      data: z.string(),
+      mimeType: z.string(),
+    })
+    .nullable(),
+});
 
 export interface XcodexBridgeClient {
   isVirtualAgentId(agentId: string): boolean;
@@ -185,6 +235,10 @@ export interface XcodexBridgeClient {
     turnId?: string | null;
     reason?: string | null;
   }>;
+  fileExplorer(
+    params: Pick<FileExplorerRequestMessage, "cwd" | "path" | "mode" | "acceptBinary">,
+  ): Promise<Omit<FileExplorerResponsePayload, "requestId" | "error">>;
+  projectIcon(cwd: string): Promise<Omit<ProjectIconResponsePayload, "requestId" | "error">>;
 }
 
 function toIso(ms: number): string {
@@ -880,6 +934,30 @@ export function createXcodexBridgeClient(options: {
           reason: z.string().nullable().optional(),
         })
         .parse(data);
+    },
+    async fileExplorer({ cwd, path: explorerPath, mode, acceptBinary }) {
+      const data = await requestV2("file.explorer", {
+        cwd,
+        path: explorerPath,
+        mode,
+        ...(acceptBinary ? { acceptBinary: true } : {}),
+      });
+      const payload = HostBridgeFileExplorerPayloadSchema.parse(data);
+      return {
+        cwd: payload.cwd,
+        path: payload.path,
+        mode: payload.mode,
+        directory: payload.directory,
+        file: payload.file,
+      };
+    },
+    async projectIcon(cwd) {
+      const data = await requestV2("project.icon", { cwd });
+      const payload = HostBridgeProjectIconPayloadSchema.parse(data);
+      return {
+        cwd: payload.cwd,
+        icon: payload.icon,
+      };
     },
   };
 }

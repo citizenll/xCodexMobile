@@ -129,12 +129,29 @@ interface CancelAgentRequest {
   agentId: string;
 }
 
+interface FileExplorerRequest {
+  type: "file_explorer_request";
+  requestId: string;
+  cwd: string;
+  path?: string;
+  mode: "list" | "file";
+  acceptBinary?: boolean;
+}
+
+interface ProjectIconRequest {
+  type: "project_icon_request";
+  requestId: string;
+  cwd: string;
+}
+
 type SessionRequest =
   | FetchAgentsRequest
   | FetchWorkspacesRequest
   | TimelineRequest
   | SendMessageRequest
   | CancelAgentRequest
+  | FileExplorerRequest
+  | ProjectIconRequest
   | { type: "fetch_agent_request"; requestId: string; agentId: string }
   | { type: "ping"; requestId: string; clientSentAt?: number }
   | { type: "client_heartbeat" }
@@ -447,6 +464,40 @@ function parseCancelAgentRequest(context: ParseContext): SessionRequest {
   return { type: "cancel_agent_request", requestId: context.requestId, agentId };
 }
 
+function parseFileExplorerRequest(context: ParseContext): SessionRequest {
+  const requestId = context.requireRequestId();
+  const cwd = context.requireField("cwd");
+  const mode = optionalString(context.message.mode);
+  if (!requestId || !cwd || (mode !== "list" && mode !== "file")) {
+    return context.reject(
+      "invalid_request",
+      "file_explorer_request requires requestId, cwd, and mode",
+    );
+  }
+  return {
+    type: "file_explorer_request",
+    requestId,
+    cwd,
+    path: optionalString(context.message.path),
+    mode,
+    acceptBinary:
+      typeof context.message.acceptBinary === "boolean" ? context.message.acceptBinary : undefined,
+  };
+}
+
+function parseProjectIconRequest(context: ParseContext): SessionRequest {
+  const requestId = context.requireRequestId();
+  const cwd = context.requireField("cwd");
+  if (!requestId || !cwd) {
+    return context.reject("invalid_request", "project_icon_request requires requestId and cwd");
+  }
+  return {
+    type: "project_icon_request",
+    requestId,
+    cwd,
+  };
+}
+
 function parseSetVoiceModeRequest(context: ParseContext): SessionRequest {
   return {
     type: "set_voice_mode",
@@ -465,6 +516,8 @@ const sessionRequestParsers: Record<string, (context: ParseContext) => SessionRe
   fetch_agent_timeline_request: parseTimelineRequest,
   send_agent_message_request: parseSendMessageRequest,
   cancel_agent_request: parseCancelAgentRequest,
+  file_explorer_request: parseFileExplorerRequest,
+  project_icon_request: parseProjectIconRequest,
   client_heartbeat: () => ({ type: "client_heartbeat" }),
   register_push_token: (context) => ({
     type: "register_push_token",
@@ -802,6 +855,12 @@ class ClientSession {
         case "cancel_agent_request":
           await this.handleCancelAgent(message);
           return;
+        case "file_explorer_request":
+          await this.handleFileExplorer(message);
+          return;
+        case "project_icon_request":
+          await this.handleProjectIcon(message);
+          return;
         case "client_heartbeat":
         case "register_push_token":
         case "audio_played":
@@ -995,6 +1054,63 @@ class ClientSession {
         agent,
       },
     });
+  }
+
+  private async handleFileExplorer(request: FileExplorerRequest) {
+    const requestedPath = request.path ?? ".";
+    try {
+      const payload = await this.bridge.fileExplorer({
+        cwd: request.cwd,
+        path: requestedPath,
+        mode: request.mode,
+        acceptBinary: request.acceptBinary,
+      });
+      this.sendSession({
+        type: "file_explorer_response",
+        payload: {
+          ...payload,
+          requestId: request.requestId,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.sendSession({
+        type: "file_explorer_response",
+        payload: {
+          cwd: request.cwd,
+          path: requestedPath,
+          mode: request.mode,
+          directory: null,
+          file: null,
+          error: getErrorMessage(error),
+          requestId: request.requestId,
+        },
+      });
+    }
+  }
+
+  private async handleProjectIcon(request: ProjectIconRequest) {
+    try {
+      const payload = await this.bridge.projectIcon(request.cwd);
+      this.sendSession({
+        type: "project_icon_response",
+        payload: {
+          ...payload,
+          requestId: request.requestId,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.sendSession({
+        type: "project_icon_response",
+        payload: {
+          cwd: request.cwd,
+          icon: null,
+          error: getErrorMessage(error),
+          requestId: request.requestId,
+        },
+      });
+    }
   }
 
   private handleBridgeEvent(event: XcodexBridgeAppServerEvent) {
