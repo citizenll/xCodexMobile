@@ -200,6 +200,7 @@ function makeOffer(input?: Partial<ConnectionOffer>): ConnectionOffer {
       endpoint: input?.relay?.endpoint ?? "relay.paseo.sh:443",
       useTls: input?.relay?.useTls ?? false,
     },
+    ...(input?.directTcp ? { directTcp: input.directTcp } : {}),
   };
 }
 
@@ -1791,6 +1792,56 @@ describe("HostRuntimeStore", () => {
         daemonPublicKeyB64: "pk_test_offer",
       },
     ]);
+
+    store.syncHosts([]);
+  });
+
+  it("stores LAN direct endpoints from a pairing offer before relay fallback", async () => {
+    const store = new HostRuntimeStore({
+      deps: {
+        createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
+        connectToDaemon: async ({ host }) => ({
+          client: makeConnectedProbeClient(5) as unknown as DaemonClient,
+          serverId: host.serverId,
+          hostname: host.label ?? null,
+        }),
+        getClientId: async () => "cid_test_runtime",
+      },
+    });
+
+    await store.upsertConnectionFromOffer(
+      makeOffer({
+        directTcp: {
+          endpoints: ["192.168.31.20:6767", "localhost:6767"],
+          useTls: false,
+        },
+      }),
+      "lan xcodex",
+    );
+
+    const pairedHost = store.getHosts().find((host) => host.serverId === "srv_offer");
+    expect(pairedHost?.connections).toEqual([
+      {
+        id: "direct:192.168.31.20:6767",
+        type: "directTcp",
+        endpoint: "192.168.31.20:6767",
+        useTls: false,
+      },
+      {
+        id: "direct:localhost:6767",
+        type: "directTcp",
+        endpoint: "localhost:6767",
+        useTls: false,
+      },
+      {
+        id: "relay:relay.paseo.sh:443",
+        type: "relay",
+        relayEndpoint: "relay.paseo.sh:443",
+        useTls: false,
+        daemonPublicKeyB64: "pk_test_offer",
+      },
+    ]);
+    expect(pairedHost?.preferredConnectionId).toBe("direct:192.168.31.20:6767");
 
     store.syncHosts([]);
   });

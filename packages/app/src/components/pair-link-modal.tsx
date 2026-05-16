@@ -10,6 +10,7 @@ import { connectToDaemon } from "@/utils/test-daemon-connection";
 import { ConnectionOfferSchema } from "@server/shared/connection-offer";
 import { AdaptiveModalSheet, AdaptiveTextInput } from "./adaptive-modal-sheet";
 import { Button } from "@/components/ui/button";
+import type { ConnectionOffer } from "@server/shared/connection-offer";
 
 const FLEX_ONE_STYLE = { flex: 1 } as const;
 
@@ -45,6 +46,40 @@ const styles = StyleSheet.create((theme) => ({
     marginTop: theme.spacing[2],
   },
 }));
+
+async function probeOfferConnection(
+  offer: ConnectionOffer,
+): Promise<{ hostname: string | null; close: () => Promise<void> }> {
+  for (const endpoint of offer.directTcp?.endpoints ?? []) {
+    try {
+      const { client, serverId, hostname } = await connectToDaemon({
+        id: `probe:${endpoint}`,
+        type: "directTcp",
+        endpoint: normalizeHostPort(endpoint),
+        useTls: offer.directTcp?.useTls ?? false,
+      });
+      if (serverId !== offer.serverId) {
+        await client.close().catch(() => undefined);
+        continue;
+      }
+      return { hostname, close: () => client.close().catch(() => undefined) };
+    } catch {
+      // Fall back through the advertised endpoints, then relay.
+    }
+  }
+
+  const { client, hostname } = await connectToDaemon(
+    {
+      id: "probe",
+      type: "relay",
+      relayEndpoint: normalizeHostPort(offer.relay.endpoint),
+      useTls: offer.relay.useTls,
+      daemonPublicKeyB64: offer.daemonPublicKeyB64,
+    },
+    { serverId: offer.serverId },
+  );
+  return { hostname, close: () => client.close().catch(() => undefined) };
+}
 
 export interface PairLinkModalProps {
   visible: boolean;
@@ -132,17 +167,8 @@ export function PairLinkModal({ visible, onClose, onCancel, onSaved }: PairLinkM
       setIsSaving(true);
       setErrorMessage("");
 
-      const { client, hostname } = await connectToDaemon(
-        {
-          id: "probe",
-          type: "relay",
-          relayEndpoint: normalizeHostPort(parsedOffer.relay.endpoint),
-          useTls: parsedOffer.relay.useTls,
-          daemonPublicKeyB64: parsedOffer.daemonPublicKeyB64,
-        },
-        { serverId: parsedOffer.serverId },
-      );
-      await client.close().catch(() => undefined);
+      const { hostname, close } = await probeOfferConnection(parsedOffer);
+      await close();
 
       const isNewHost = !daemons.some((daemon) => daemon.serverId === parsedOffer.serverId);
       const profile = await upsertDaemonFromOfferUrl(raw, hostname ?? undefined);

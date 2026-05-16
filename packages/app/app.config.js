@@ -66,6 +66,8 @@ export default {
       supportsTablet: true,
       infoPlist: {
         NSMicrophoneUsageDescription: "This app needs access to the microphone for voice commands.",
+        NSLocalNetworkUsageDescription:
+          "xCodex uses local network access to discover and connect to your desktop connector.",
         ITSAppUsesNonExemptEncryption: false,
       },
       bundleIdentifier: variant.packageId,
@@ -87,6 +89,7 @@ export default {
         "RECORD_AUDIO",
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.ACCESS_NETWORK_STATE",
         "CAMERA",
         "android.permission.CAMERA",
       ],

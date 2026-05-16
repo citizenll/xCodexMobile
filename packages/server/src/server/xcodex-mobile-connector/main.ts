@@ -4,7 +4,11 @@ import { homedir, hostname } from "node:os";
 import path from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 
-import { createConnectionOfferV2, encodeOfferToFragmentUrl } from "../connection-offer.js";
+import {
+  buildOfferEndpoints,
+  createConnectionOfferV2,
+  encodeOfferToFragmentUrl,
+} from "../connection-offer.js";
 import { loadOrCreateDaemonKeyPair } from "../daemon-keypair.js";
 import { acquirePidLock, releasePidLock, updatePidLock } from "../pid-lock.js";
 import { startRelayTransport, type RelayTransportController } from "../relay-transport.js";
@@ -292,6 +296,74 @@ function formatListenAddress(
   }
   const host = address.family === "IPv6" ? `[${address.address}]` : address.address;
   return `${host}:${address.port}`;
+}
+
+function splitListenEndpoint(endpoint: string): { host: string; port: number } | null {
+  const trimmed = endpoint.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("[")) {
+    const end = trimmed.indexOf("]");
+    if (end < 0 || trimmed[end + 1] !== ":") return null;
+    const port = Number(trimmed.slice(end + 2));
+    return Number.isInteger(port) ? { host: trimmed.slice(1, end), port } : null;
+  }
+  const splitAt = trimmed.lastIndexOf(":");
+  if (splitAt <= 0) return null;
+  const port = Number(trimmed.slice(splitAt + 1));
+  return Number.isInteger(port) ? { host: trimmed.slice(0, splitAt), port } : null;
+}
+
+function isLoopbackHost(host: string): boolean {
+  const normalized = host
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "");
+  return (
+    normalized === "localhost" ||
+    normalized === "127.0.0.1" ||
+    normalized === "::1" ||
+    normalized.startsWith("127.")
+  );
+}
+
+function isLoopbackEndpoint(endpoint: string): boolean {
+  const parsed = splitListenEndpoint(endpoint);
+  return parsed ? isLoopbackHost(parsed.host) : true;
+}
+
+function normalizeRequestHostHeader(hostHeader: string | string[] | undefined): string | null {
+  const raw = Array.isArray(hostHeader) ? hostHeader[0] : hostHeader;
+  const normalized = raw?.trim();
+  if (!normalized || normalized.includes("/") || normalized.includes("\\")) return null;
+  return splitListenEndpoint(normalized) && !isLoopbackEndpoint(normalized) ? normalized : null;
+}
+
+function dedupePreserveOrder(values: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
+function buildAdvertisedDirectTcpEndpoints(input: {
+  configuredListen: ListenAddress;
+  actualListen?: string;
+  requestHost?: string | string[];
+}): string[] {
+  const actual = input.actualListen ? splitListenEndpoint(input.actualListen) : null;
+  const port = actual?.port ?? input.configuredListen.port;
+  if (port <= 0 || input.configuredListen.port <= 0) return [];
+
+  const endpoints = [
+    normalizeRequestHostHeader(input.requestHost),
+    ...buildOfferEndpoints({ listenHost: input.configuredListen.host, port }),
+  ].filter((endpoint): endpoint is string => Boolean(endpoint));
+
+  return dedupePreserveOrder(endpoints).filter((endpoint) => !isLoopbackEndpoint(endpoint));
 }
 
 function toText(data: unknown): string {
@@ -1167,6 +1239,7 @@ class ClientSession {
 
 async function generatePairingOffer(options: {
   paseoHome: string;
+  listen: ListenAddress;
   relayEndpoint: string;
   relayUseTls: boolean;
   appBaseUrl: string;
@@ -1175,13 +1248,21 @@ async function generatePairingOffer(options: {
   await mkdir(options.paseoHome, { recursive: true });
   const serverId = getOrCreateServerId(options.paseoHome, { logger: options.logger });
   const daemonKeyPair = await loadOrCreateDaemonKeyPair(options.paseoHome, options.logger as never);
+  const directTcpEndpoints = buildAdvertisedDirectTcpEndpoints({
+    configuredListen: options.listen,
+  });
   const offer = await createConnectionOfferV2({
     serverId,
     daemonPublicKeyB64: daemonKeyPair.publicKeyB64,
     relay: { endpoint: options.relayEndpoint, useTls: options.relayUseTls },
+    ...(directTcpEndpoints.length > 0
+      ? { directTcp: { endpoints: directTcpEndpoints, useTls: false } }
+      : {}),
   });
   return {
     relayEnabled: true,
+    directTcpEnabled: directTcpEndpoints.length > 0,
+    directTcpEndpoints,
     url: encodeOfferToFragmentUrl({ offer, appBaseUrl: options.appBaseUrl }),
     qr: null,
   };
@@ -1242,8 +1323,11 @@ async function startConnector(options: ServerOptions) {
     };
   }
 
+  let advertisedDirectTcpEndpoints: string[] = [];
+
   const server = createServer((request, response) => {
-    if (request.url === "/api/health") {
+    const pathname = request.url?.split("?")[0] ?? "/";
+    if (pathname === "/api/health") {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
         JSON.stringify({
@@ -1251,13 +1335,58 @@ async function startConnector(options: ServerOptions) {
           serverId,
           relayEnabled: options.relayEnabled,
           relayEndpoint: options.relayEndpoint,
+          relayUseTls: options.relayUseTls,
+          directTcpEnabled: advertisedDirectTcpEndpoints.length > 0,
+          directTcpEndpoints: advertisedDirectTcpEndpoints,
           version: CONNECTOR_VERSION,
           xcodexConnector: {
             realtimeStreamingEnabled: options.realtimeStreamingEnabled,
+            directTcpEndpoints: advertisedDirectTcpEndpoints,
           },
           clients: mobileClientStatus(),
         }),
       );
+      return;
+    }
+    if (pathname === "/api/discovery" || pathname === "/api/xcodex/discovery") {
+      const directTcpEndpoints = buildAdvertisedDirectTcpEndpoints({
+        configuredListen: options.listen,
+        actualListen: formatListenAddress(server.address()),
+        requestHost: request.headers.host,
+      });
+      void (async () => {
+        try {
+          const offer = await createConnectionOfferV2({
+            serverId,
+            daemonPublicKeyB64: daemonKeyPair.publicKeyB64,
+            relay: { endpoint: options.relayEndpoint, useTls: options.relayUseTls },
+            ...(directTcpEndpoints.length > 0
+              ? { directTcp: { endpoints: directTcpEndpoints, useTls: false } }
+              : {}),
+          });
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(
+            JSON.stringify({
+              ok: true,
+              kind: "xcodex_mobile_connector",
+              v: 1,
+              serverId,
+              hostname: hostname(),
+              version: CONNECTOR_VERSION,
+              relay: { endpoint: options.relayEndpoint, useTls: options.relayUseTls },
+              directTcp: {
+                endpoints: directTcpEndpoints,
+                useTls: false,
+              },
+              offer,
+              offerUrl: encodeOfferToFragmentUrl({ offer, appBaseUrl: options.appBaseUrl }),
+            }),
+          );
+        } catch (error) {
+          response.writeHead(500, { "content-type": "application/json" });
+          response.end(JSON.stringify({ ok: false, error: getErrorMessage(error) }));
+        }
+      })();
       return;
     }
     response.writeHead(404, { "content-type": "application/json" });
@@ -1301,6 +1430,10 @@ async function startConnector(options: ServerOptions) {
   });
 
   const listen = formatListenAddress(server.address());
+  advertisedDirectTcpEndpoints = buildAdvertisedDirectTcpEndpoints({
+    configuredListen: options.listen,
+    actualListen: listen,
+  });
   await updatePidLock(options.paseoHome, { listen });
 
   if (options.relayEnabled) {

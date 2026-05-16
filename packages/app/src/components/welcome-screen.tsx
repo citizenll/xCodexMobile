@@ -5,7 +5,12 @@ import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { QrCode, Link2, ClipboardPaste, ExternalLink, Settings } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { HostProfile } from "@/types/host-connection";
-import { getHostRuntimeStore, isHostRuntimeConnected, useHosts } from "@/runtime/host-runtime";
+import {
+  getHostRuntimeStore,
+  isHostRuntimeConnected,
+  useHostMutations,
+  useHosts,
+} from "@/runtime/host-runtime";
 import { AddHostModal } from "./add-host-modal";
 import { PairLinkModal } from "./pair-link-modal";
 import { Button } from "@/components/ui/button";
@@ -15,9 +20,10 @@ import { buildHostRootRoute } from "@/utils/host-routes";
 import { PaseoLogo } from "@/components/icons/paseo-logo";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { isWeb, isNative } from "@/constants/platform";
+import { discoverXcodexLanHosts } from "@/utils/lan-discovery";
 
 interface WelcomeAction {
-  key: "scan-qr" | "direct-connection" | "paste-pairing-link";
+  key: "lan-discovery" | "scan-qr" | "direct-connection" | "paste-pairing-link";
   label: string;
   testID: string;
   primary: boolean;
@@ -110,6 +116,11 @@ const styles = StyleSheet.create((theme) => ({
     alignSelf: "center",
     marginTop: theme.spacing[6],
   },
+  errorText: {
+    color: theme.colors.destructive,
+    fontSize: theme.fontSize.sm,
+    textAlign: "center",
+  },
 }));
 
 function useAnyHostOnline(serverIds: string[]): string | null {
@@ -163,7 +174,10 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
   const appVersionText = formatVersionWithPrefix(appVersion);
   const [isDirectOpen, setIsDirectOpen] = useState(false);
   const [isPasteLinkOpen, setIsPasteLinkOpen] = useState(false);
+  const [isDiscoveringLan, setIsDiscoveringLan] = useState(false);
+  const [lanDiscoveryError, setLanDiscoveryError] = useState("");
   const hosts = useHosts();
+  const { upsertConnectionFromOffer } = useHostMutations();
   const anyOnlineServerId = useAnyHostOnline(hosts.map((h) => h.serverId));
 
   useEffect(() => {
@@ -193,6 +207,25 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
   const handleScanQr = useCallback(() => {
     router.push("/pair-scan?source=onboarding");
   }, [router]);
+  const handleDiscoverLan = useCallback(async () => {
+    if (isDiscoveringLan) return;
+    setIsDiscoveringLan(true);
+    setLanDiscoveryError("");
+    try {
+      const [result] = await discoverXcodexLanHosts({ maxResults: 1 });
+      if (!result) {
+        setLanDiscoveryError("No xCodex connector found on this local network.");
+        return;
+      }
+      const profile = await upsertConnectionFromOffer(result.offer, result.hostname ?? "xCodex");
+      onHostAdded?.(profile);
+      finishOnboarding(result.offer.serverId);
+    } catch (error) {
+      setLanDiscoveryError(error instanceof Error ? error.message : "LAN discovery failed.");
+    } finally {
+      setIsDiscoveringLan(false);
+    }
+  }, [finishOnboarding, isDiscoveringLan, onHostAdded, upsertConnectionFromOffer]);
 
   const handleHostSaved = useCallback(
     ({ profile, serverId }: { profile: HostProfile; serverId: string }) => {
@@ -223,10 +256,18 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
       ]
     : [
         {
+          key: "lan-discovery",
+          label: isDiscoveringLan ? "Searching LAN..." : "Find on LAN",
+          testID: "welcome-lan-discovery",
+          primary: true,
+          icon: Link2,
+          onPress: handleDiscoverLan,
+        },
+        {
           key: "scan-qr",
           label: "Scan QR code",
           testID: "welcome-scan-qr",
-          primary: true,
+          primary: false,
           icon: QrCode,
           onPress: handleScanQr,
         },
@@ -278,6 +319,7 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
             {actions.map((action) => (
               <WelcomeActionButton key={action.key} action={action} />
             ))}
+            {lanDiscoveryError ? <Text style={styles.errorText}>{lanDiscoveryError}</Text> : null}
           </View>
 
           <Button

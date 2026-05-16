@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { QrCode, Link2, ClipboardPaste } from "lucide-react-native";
+import { QrCode, Link2, ClipboardPaste, Search } from "lucide-react-native";
 import { AdaptiveModalSheet } from "./adaptive-modal-sheet";
 import { isNative } from "@/constants/platform";
 
@@ -34,6 +34,7 @@ const styles = StyleSheet.create((theme) => ({
 export interface AddHostMethodModalProps {
   visible: boolean;
   onClose: () => void;
+  onLanDiscovery: () => void;
   onDirectConnection: () => void;
   onScanQr: () => void;
   onPasteLink: () => void;
@@ -42,11 +43,16 @@ export interface AddHostMethodModalProps {
 export function AddHostMethodModal({
   visible,
   onClose,
+  onLanDiscovery,
   onDirectConnection,
   onScanQr,
   onPasteLink,
 }: AddHostMethodModalProps) {
   const { theme } = useUnistyles();
+
+  const handleLanDiscovery = useCallback(() => {
+    onLanDiscovery();
+  }, [onLanDiscovery]);
 
   const handleDirect = useCallback(() => {
     onDirectConnection();
@@ -67,6 +73,22 @@ export function AddHostMethodModal({
       onClose={onClose}
       testID="add-host-method-modal"
     >
+      {isNative ? (
+        <Pressable
+          style={styles.option}
+          onPress={handleLanDiscovery}
+          accessibilityRole="button"
+          accessibilityLabel="Find on LAN"
+          testID="add-host-method-lan-discovery"
+        >
+          <Search size={18} color={theme.colors.foreground} />
+          <View style={styles.optionBody}>
+            <Text style={styles.optionText}>Find on LAN</Text>
+            <Text style={styles.optionSubtext}>Automatically discover xCodex on this network.</Text>
+          </View>
+        </Pressable>
+      ) : null}
+
       <Pressable
         style={styles.option}
         onPress={handleDirect}

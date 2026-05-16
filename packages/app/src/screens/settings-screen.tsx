@@ -43,7 +43,12 @@ import {
   type Settings as EffectiveSettings,
 } from "@/hooks/use-settings";
 import { THEME_SWATCHES } from "@/styles/theme";
-import { getHostRuntimeStore, isHostRuntimeConnected, useHosts } from "@/runtime/host-runtime";
+import {
+  getHostRuntimeStore,
+  isHostRuntimeConnected,
+  useHostMutations,
+  useHosts,
+} from "@/runtime/host-runtime";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { useWindowControlsPadding } from "@/utils/desktop-window";
 import { confirmDialog } from "@/utils/confirm-dialog";
@@ -77,6 +82,7 @@ import ProjectSettingsScreen from "@/screens/project-settings-screen";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
 import { useWebScrollbarStyle } from "@/hooks/use-web-scrollbar-style";
+import { discoverXcodexLanHosts } from "@/utils/lan-discovery";
 import {
   buildHostOpenProjectRoute,
   buildProjectsSettingsRoute,
@@ -812,6 +818,7 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
   const [isAddHostMethodVisible, setIsAddHostMethodVisible] = useState(false);
   const [isDirectHostVisible, setIsDirectHostVisible] = useState(false);
   const [isPasteLinkVisible, setIsPasteLinkVisible] = useState(false);
+  const [isLanDiscoveryRunning, setIsLanDiscoveryRunning] = useState(false);
   const [isPlaybackTestRunning, setIsPlaybackTestRunning] = useState(false);
   const [playbackTestResult, setPlaybackTestResult] = useState<string | null>(null);
   const isDesktopApp = isElectronRuntime();
@@ -826,6 +833,7 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
     [webScrollbarStyle],
   );
   const hosts = useHosts();
+  const { upsertConnectionFromOffer } = useHostMutations();
   const hostServerIds = useMemo(() => hosts.map((host) => host.serverId), [hosts]);
   const anyOnlineServerId = useAnyOnlineHostServerId(hostServerIds);
 
@@ -916,6 +924,25 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
     },
     [isCompactLayout, router],
   );
+
+  const handleLanDiscovery = useCallback(async () => {
+    if (isLanDiscoveryRunning) return;
+    setIsLanDiscoveryRunning(true);
+    try {
+      const [result] = await discoverXcodexLanHosts({ maxResults: 1 });
+      if (!result) {
+        Alert.alert("LAN discovery", "No xCodex connector found on this local network.");
+        return;
+      }
+      const profile = await upsertConnectionFromOffer(result.offer, result.hostname ?? "xCodex");
+      closeAddConnectionFlow();
+      handleHostAdded({ serverId: profile.serverId });
+    } catch (error) {
+      Alert.alert("LAN discovery failed", error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsLanDiscoveryRunning(false);
+    }
+  }, [closeAddConnectionFlow, handleHostAdded, isLanDiscoveryRunning, upsertConnectionFromOffer]);
 
   const handleSelectSection = useCallback(
     (section: SettingsSectionSlug) => {
@@ -1068,6 +1095,7 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
       <AddHostMethodModal
         visible={isAddHostMethodVisible}
         onClose={closeAddConnectionFlow}
+        onLanDiscovery={handleLanDiscovery}
         onDirectConnection={handleSelectDirectConnection}
         onPasteLink={handleSelectPasteLink}
         onScanQr={handleScanQr}

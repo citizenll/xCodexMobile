@@ -1520,13 +1520,42 @@ export class HostRuntimeStore {
   async upsertConnectionFromOffer(offer: ConnectionOffer, label?: string): Promise<HostProfile> {
     // COMPAT(oldRelayOfferTls): added in v0.1.73, remove after 2026-11-10.
     const useTls = offer.relay.useTls ?? shouldUseTlsForDefaultHostedRelay(offer.relay.endpoint);
-    return this.upsertRelayConnection({
-      serverId: offer.serverId,
-      relayEndpoint: offer.relay.endpoint,
+    const connections: HostConnection[] = [];
+    const directTcp = offer.directTcp;
+    if (directTcp) {
+      for (const endpoint of directTcp.endpoints) {
+        const connection = connectionFromListen(endpoint);
+        if (connection?.type !== "directTcp") {
+          continue;
+        }
+        connections.push({
+          ...connection,
+          useTls: directTcp.useTls ?? false,
+        });
+      }
+    }
+    connections.push({
+      id: useTls
+        ? `relay:wss:${normalizeHostPort(offer.relay.endpoint)}`
+        : `relay:${normalizeHostPort(offer.relay.endpoint)}`,
+      type: "relay",
+      relayEndpoint: normalizeHostPort(offer.relay.endpoint),
       useTls,
       daemonPublicKeyB64: offer.daemonPublicKeyB64,
-      label,
     });
+
+    let profile: HostProfile | null = null;
+    for (const connection of connections) {
+      profile = await this.upsertHostConnection({
+        serverId: offer.serverId,
+        label,
+        connection,
+      });
+    }
+    if (!profile) {
+      throw new Error("Pairing offer did not contain any usable connection.");
+    }
+    return profile;
   }
 
   async upsertConnectionFromOfferUrl(

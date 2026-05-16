@@ -1,7 +1,12 @@
 import { z } from "zod";
 
+const DirectTcpOfferSchema = z.object({
+  endpoints: z.array(z.string().min(1)).min(1),
+  useTls: z.boolean().optional(),
+});
+
 /**
- * Relay-only pairing offer.
+ * Pairing offer for a daemon reachable through relay and, when enabled, LAN.
  *
  * `serverId` is a stable daemon identifier scoped to `PASEO_HOME`, and is also
  * used as the relay session identifier.
@@ -14,6 +19,7 @@ export const ConnectionOfferV2Schema = z.object({
     endpoint: z.string().min(1),
     useTls: z.boolean().optional(),
   }),
+  directTcp: DirectTcpOfferSchema.optional(),
 });
 
 export type ConnectionOfferV2 = z.infer<typeof ConnectionOfferV2Schema>;
