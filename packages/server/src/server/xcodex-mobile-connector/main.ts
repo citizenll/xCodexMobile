@@ -15,6 +15,10 @@ import {
   type XcodexBridgeClient,
 } from "../xcodex-bridge.js";
 import { DEFAULT_APP_BASE_URL, DEFAULT_RELAY_ENDPOINT } from "../../shared/product-defaults.js";
+import {
+  createXcodexStreamEventMapper,
+  isXcodexTurnLifecycleAppServerEvent,
+} from "./stream-events.js";
 
 declare const __XCODEX_CONNECTOR_VERSION__: string;
 declare const __XCODEX_CONNECTOR_BUILD_TIME__: string;
@@ -152,17 +156,19 @@ interface ServerOptions {
   relayEndpoint: string;
   relayUseTls: boolean;
   appBaseUrl: string;
+  realtimeStreamingEnabled: boolean;
   logger: LoggerLike;
-}
-
-interface AppServerMessage {
-  method?: unknown;
-  params?: unknown;
 }
 
 interface ActiveSubscription<TRequest> {
   subscriptionId: string;
   request: TRequest;
+}
+
+interface MobileClientConnectionTracker {
+  connected(connectionId: string, clientId: string): void;
+  seen(connectionId: string): void;
+  disconnected(connectionId: string): void;
 }
 
 function createLogger(bindings: Record<string, unknown> = {}): LoggerLike {
@@ -618,53 +624,25 @@ function xcodexEventTimestamp(event: XcodexBridgeAppServerEvent): string {
   return new Date(emittedAtMs).toISOString();
 }
 
-function xcodexStreamEventFromAppServer(
-  event: XcodexBridgeAppServerEvent,
-): Record<string, unknown> | null {
-  const message = recordFromUnknown(event.payload.message) as AppServerMessage | null;
-  const method = typeof message?.method === "string" ? message.method : "";
-  const params = recordFromUnknown(message?.params);
-  const turn = recordFromUnknown(params?.turn);
-  const status = stringField(turn, ["status"]);
-  const error = recordFromUnknown(turn?.error);
-  const errorMessage =
-    stringField(error, ["message"]) ??
-    stringField(params, ["error", "message"]) ??
-    "xCodex turn failed";
-
-  if (method === "turn/started") {
-    return { type: "turn_started", provider: "xcodex" };
-  }
-  if (method === "turn/failed") {
-    return { type: "turn_failed", provider: "xcodex", error: errorMessage };
-  }
-  if (method === "turn/canceled" || method === "turn/cancelled") {
-    return { type: "turn_canceled", provider: "xcodex", reason: "canceled" };
-  }
-  if (method === "turn/completed") {
-    if (status === "failed") {
-      return { type: "turn_failed", provider: "xcodex", error: errorMessage };
-    }
-    if (status === "canceled" || status === "cancelled") {
-      return { type: "turn_canceled", provider: "xcodex", reason: "canceled" };
-    }
-    return { type: "turn_completed", provider: "xcodex" };
-  }
-  return null;
-}
-
 class ClientSession {
   private active = false;
+  private clientId: string | null = null;
+  private disposed = false;
   private agentSubscription: ActiveSubscription<FetchAgentsRequest> | null = null;
   private workspaceSubscription: ActiveSubscription<FetchWorkspacesRequest> | null = null;
+  private readonly xcodexStreamEvents: ReturnType<typeof createXcodexStreamEventMapper>;
   private readonly unsubscribeBridgeEvents: () => void;
 
   constructor(
+    private readonly connectionId: string,
     private readonly socket: SocketLike,
     private readonly bridge: XcodexBridgeClient,
     private readonly serverId: string,
     private readonly logger: LoggerLike,
+    private readonly tracker: MobileClientConnectionTracker,
+    private readonly realtimeStreamingEnabled: boolean,
   ) {
+    this.xcodexStreamEvents = createXcodexStreamEventMapper({ realtimeStreamingEnabled });
     this.unsubscribeBridgeEvents = bridge.subscribeEvents((event) => this.handleBridgeEvent(event));
     socket.on("message", (data) => {
       void this.handleRawMessage(data);
@@ -677,7 +655,18 @@ class ClientSession {
   }
 
   dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
     this.unsubscribeBridgeEvents();
+    if (this.clientId) {
+      this.tracker.disconnected(this.connectionId);
+    }
+  }
+
+  private markSeen() {
+    if (this.clientId) {
+      this.tracker.seen(this.connectionId);
+    }
   }
 
   private sendEnvelope(message: Record<string, unknown>) {
@@ -718,6 +707,7 @@ class ClientSession {
     }
 
     if (parsed.type === "ping") {
+      this.markSeen();
       this.sendEnvelope({ type: "pong" });
       return;
     }
@@ -728,6 +718,7 @@ class ClientSession {
       this.handleHello(parsed);
       return;
     }
+    this.markSeen();
     if (parsed.type === "hello") {
       this.socket.close(1002, "Unexpected hello");
       return;
@@ -754,6 +745,8 @@ class ClientSession {
       return;
     }
     this.active = true;
+    this.clientId = clientId;
+    this.tracker.connected(this.connectionId, clientId);
     this.logger.info({ clientId }, "client_connected");
     this.sendSession({
       type: "status",
@@ -1009,7 +1002,7 @@ class ClientSession {
     const threadId = xcodexThreadIdFromEvent(event);
     if (!threadId) return;
     const agentId = `xcodex:${event.payload.workspaceId}:${threadId}`;
-    const streamEvent = xcodexStreamEventFromAppServer(event);
+    const streamEvent = this.xcodexStreamEvents.fromAppServer(event);
     if (streamEvent) {
       this.sendSession({
         type: "agent_stream",
@@ -1021,6 +1014,9 @@ class ClientSession {
           epoch: agentId,
         },
       });
+    }
+    if (!this.realtimeStreamingEnabled && !isXcodexTurnLifecycleAppServerEvent(event)) {
+      return;
     }
     void this.forwardAgentUpdate(agentId);
     void this.forwardWorkspaceUpdate(event.payload.workspaceId);
@@ -1084,6 +1080,51 @@ async function startConnector(options: ServerOptions) {
   const bridge = createXcodexBridgeClient({ logger: options.logger as never });
   const wsServer = new WebSocketServer({ noServer: true });
   let relay: RelayTransportController | null = null;
+  let nextConnectionSeq = 1;
+  let lastClientId: string | null = null;
+  let lastConnectedAt: string | null = null;
+  let lastSeenAt: string | null = null;
+  let lastDisconnectedAt: string | null = null;
+  const activeClients = new Map<
+    string,
+    { clientId: string; connectedAt: string; lastSeenAt: string }
+  >();
+
+  const clientTracker: MobileClientConnectionTracker = {
+    connected(connectionId, clientId) {
+      const now = new Date().toISOString();
+      activeClients.set(connectionId, { clientId, connectedAt: now, lastSeenAt: now });
+      lastClientId = clientId;
+      lastConnectedAt = now;
+      lastSeenAt = now;
+    },
+    seen(connectionId) {
+      const client = activeClients.get(connectionId);
+      if (!client) return;
+      const now = new Date().toISOString();
+      client.lastSeenAt = now;
+      lastClientId = client.clientId;
+      lastSeenAt = now;
+    },
+    disconnected(connectionId) {
+      const client = activeClients.get(connectionId);
+      if (!client) return;
+      activeClients.delete(connectionId);
+      lastClientId = client.clientId;
+      lastDisconnectedAt = new Date().toISOString();
+    },
+  };
+
+  function mobileClientStatus() {
+    return {
+      activeCount: activeClients.size,
+      activeClientIds: [...new Set([...activeClients.values()].map((client) => client.clientId))],
+      lastClientId,
+      lastConnectedAt,
+      lastSeenAt,
+      lastDisconnectedAt,
+    };
+  }
 
   const server = createServer((request, response) => {
     if (request.url === "/api/health") {
@@ -1095,6 +1136,10 @@ async function startConnector(options: ServerOptions) {
           relayEnabled: options.relayEnabled,
           relayEndpoint: options.relayEndpoint,
           version: CONNECTOR_VERSION,
+          xcodexConnector: {
+            realtimeStreamingEnabled: options.realtimeStreamingEnabled,
+          },
+          clients: mobileClientStatus(),
         }),
       );
       return;
@@ -1104,11 +1149,15 @@ async function startConnector(options: ServerOptions) {
   });
 
   const attachSocket = async (socket: SocketLike) => {
+    const connectionId = `mobile-${Date.now()}-${nextConnectionSeq++}`;
     const session = new ClientSession(
+      connectionId,
       socket,
       bridge,
       serverId,
       options.logger.child({ client: "mobile" }),
+      clientTracker,
+      options.realtimeStreamingEnabled,
     );
     void session;
   };
@@ -1155,6 +1204,7 @@ async function startConnector(options: ServerOptions) {
       serverId,
       relayEnabled: options.relayEnabled,
       relayEndpoint: options.relayEndpoint,
+      realtimeStreamingEnabled: options.realtimeStreamingEnabled,
     },
     "xcodex_mobile_connector_started",
   );
@@ -1184,6 +1234,7 @@ async function main() {
     relayEndpoint: getEnvString("PASEO_RELAY_ENDPOINT", DEFAULT_RELAY_ENDPOINT),
     relayUseTls: getEnvBoolean("PASEO_RELAY_USE_TLS", true),
     appBaseUrl: getEnvString("PASEO_APP_BASE_URL", DEFAULT_APP_BASE_URL),
+    realtimeStreamingEnabled: getEnvBoolean("XCODEX_MOBILE_REALTIME_STREAMING_ENABLED", false),
     logger,
   } satisfies ServerOptions;
 
