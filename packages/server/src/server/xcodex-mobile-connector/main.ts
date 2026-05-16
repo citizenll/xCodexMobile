@@ -1,0 +1,1202 @@
+import { createServer, type IncomingMessage } from "node:http";
+import { mkdir } from "node:fs/promises";
+import { homedir, hostname } from "node:os";
+import path from "node:path";
+import { WebSocket, WebSocketServer } from "ws";
+
+import { createConnectionOfferV2, encodeOfferToFragmentUrl } from "../connection-offer.js";
+import { loadOrCreateDaemonKeyPair } from "../daemon-keypair.js";
+import { acquirePidLock, releasePidLock, updatePidLock } from "../pid-lock.js";
+import { startRelayTransport, type RelayTransportController } from "../relay-transport.js";
+import { getOrCreateServerId } from "../server-id.js";
+import {
+  createXcodexBridgeClient,
+  type XcodexBridgeAppServerEvent,
+  type XcodexBridgeClient,
+} from "../xcodex-bridge.js";
+import { DEFAULT_APP_BASE_URL, DEFAULT_RELAY_ENDPOINT } from "../../shared/product-defaults.js";
+
+declare const __XCODEX_CONNECTOR_VERSION__: string;
+declare const __XCODEX_CONNECTOR_BUILD_TIME__: string;
+
+const WS_PROTOCOL_VERSION = 1;
+const CONNECTOR_VERSION =
+  typeof __XCODEX_CONNECTOR_VERSION__ === "string" ? __XCODEX_CONNECTOR_VERSION__ : "dev";
+const CONNECTOR_BUILD_TIME =
+  typeof __XCODEX_CONNECTOR_BUILD_TIME__ === "string"
+    ? __XCODEX_CONNECTOR_BUILD_TIME__
+    : new Date(0).toISOString();
+
+interface LoggerLike {
+  child(bindings: Record<string, unknown>): LoggerLike;
+  debug(obj: object, msg?: string): void;
+  info(obj: object, msg?: string): void;
+  warn(obj: object, msg?: string): void;
+  error(obj: object, msg?: string): void;
+}
+
+interface SocketLike {
+  readonly readyState: number;
+  send(data: string | Uint8Array | ArrayBuffer): void;
+  close(code?: number, reason?: string): void;
+  on(event: "message" | "close" | "error", listener: (...args: unknown[]) => void): void;
+  once(event: "close" | "error", listener: (...args: unknown[]) => void): void;
+}
+
+interface ListenAddress {
+  host: string;
+  port: number;
+}
+
+interface AgentSnapshot {
+  id: string;
+  provider: string;
+  cwd: string;
+  createdAt: string;
+  updatedAt: string;
+  status: string;
+  title?: string | null;
+  labels: Record<string, string>;
+  archivedAt?: string | null;
+  pendingPermissions?: unknown[];
+  requiresAttention?: boolean;
+  attentionReason?: string | null;
+  thinkingOptionId?: string | null;
+  effectiveThinkingOptionId?: string | null;
+}
+
+interface ProjectPlacement {
+  projectKey: string;
+  projectName: string;
+}
+
+interface AgentFilter {
+  labels?: Record<string, string>;
+  projectKeys?: string[];
+  statuses?: string[];
+  includeArchived?: boolean;
+  requiresAttention?: boolean;
+  thinkingOptionId?: string | null;
+}
+
+interface FetchAgentsRequest {
+  type: "fetch_agents_request" | "fetch_agent_history_request";
+  requestId: string;
+  scope?: "active";
+  filter?: AgentFilter;
+  sort?: Array<{
+    key: "status_priority" | "created_at" | "updated_at" | "title";
+    direction: "asc" | "desc";
+  }>;
+  page?: { limit?: number; cursor?: string };
+  subscribe?: { subscriptionId?: string };
+}
+
+interface FetchWorkspacesRequest {
+  type: "fetch_workspaces_request";
+  requestId: string;
+  filter?: Record<string, unknown>;
+  sort?: Array<Record<string, unknown>>;
+  page?: { limit?: number; cursor?: string };
+  subscribe?: { subscriptionId?: string };
+}
+
+interface TimelineRequest {
+  type: "fetch_agent_timeline_request";
+  requestId: string;
+  agentId: string;
+  direction?: "tail" | "before" | "after";
+  cursor?: { epoch: string; seq: number };
+  limit?: number;
+  projection?: "projected" | "canonical";
+}
+
+interface SendMessageRequest {
+  type: "send_agent_message_request";
+  requestId: string;
+  agentId: string;
+  text: string;
+  messageId?: string;
+}
+
+interface CancelAgentRequest {
+  type: "cancel_agent_request";
+  requestId?: string;
+  agentId: string;
+}
+
+type SessionRequest =
+  | FetchAgentsRequest
+  | FetchWorkspacesRequest
+  | TimelineRequest
+  | SendMessageRequest
+  | CancelAgentRequest
+  | { type: "fetch_agent_request"; requestId: string; agentId: string }
+  | { type: "ping"; requestId: string; clientSentAt?: number }
+  | { type: "client_heartbeat" }
+  | { type: "register_push_token"; token?: string }
+  | { type: "audio_played"; id?: string }
+  | { type: "set_voice_mode"; requestId?: string; enabled?: boolean; agentId?: string }
+  | {
+      type: "rejected_request";
+      requestId?: string;
+      originalType: string;
+      code: "invalid_request" | "unsupported_request";
+      error: string;
+    };
+
+interface ServerOptions {
+  paseoHome: string;
+  listen: ListenAddress;
+  relayEnabled: boolean;
+  relayEndpoint: string;
+  relayUseTls: boolean;
+  appBaseUrl: string;
+  logger: LoggerLike;
+}
+
+interface AppServerMessage {
+  method?: unknown;
+  params?: unknown;
+}
+
+interface ActiveSubscription<TRequest> {
+  subscriptionId: string;
+  request: TRequest;
+}
+
+function createLogger(bindings: Record<string, unknown> = {}): LoggerLike {
+  const minLevel = process.env.PASEO_CONNECTOR_LOG_LEVEL?.trim().toLowerCase() || "info";
+  const ranks: Record<string, number> = { debug: 10, info: 20, warn: 30, error: 40 };
+  const minRank = ranks[minLevel] ?? ranks.info;
+
+  function write(level: keyof typeof ranks, obj: object, msg?: string) {
+    if (ranks[level] < minRank) return;
+    const line = {
+      level,
+      time: new Date().toISOString(),
+      ...bindings,
+      msg,
+      ...obj,
+    };
+    const text = JSON.stringify(line);
+    if (level === "error") {
+      console.error(text);
+    } else if (level === "warn") {
+      console.warn(text);
+    } else {
+      console.log(text);
+    }
+  }
+
+  return {
+    child(nextBindings) {
+      return createLogger({ ...bindings, ...nextBindings });
+    },
+    debug: (obj, msg) => write("debug", obj, msg),
+    info: (obj, msg) => write("info", obj, msg),
+    warn: (obj, msg) => write("warn", obj, msg),
+    error: (obj, msg) => write("error", obj, msg),
+  };
+}
+
+function createSilentLogger(): LoggerLike {
+  return {
+    child() {
+      return this;
+    },
+    debug() {},
+    info() {},
+    warn() {},
+    error() {},
+  };
+}
+
+function getEnvString(name: string, fallback: string): string {
+  const value = process.env[name]?.trim();
+  return value ? value : fallback;
+}
+
+function getEnvBoolean(name: string, fallback: boolean): boolean {
+  const value = process.env[name]?.trim().toLowerCase();
+  if (!value) return fallback;
+  if (["1", "true", "yes", "on"].includes(value)) return true;
+  if (["0", "false", "no", "off"].includes(value)) return false;
+  return fallback;
+}
+
+function resolvePaseoHome(): string {
+  return getEnvString("PASEO_HOME", path.join(homedir(), ".paseo"));
+}
+
+function parseListenAddress(raw: string): ListenAddress {
+  const input = raw.trim();
+  if (!input) {
+    throw new Error("PASEO_LISTEN is empty");
+  }
+
+  if (input.startsWith("[")) {
+    const end = input.indexOf("]");
+    if (end < 0 || input[end + 1] !== ":") {
+      throw new Error(`Invalid listen address: ${raw}`);
+    }
+    return normalizeListenAddress(input.slice(1, end), input.slice(end + 2), raw);
+  }
+
+  const splitAt = input.lastIndexOf(":");
+  if (splitAt <= 0) {
+    throw new Error(`Invalid listen address: ${raw}`);
+  }
+  return normalizeListenAddress(input.slice(0, splitAt), input.slice(splitAt + 1), raw);
+}
+
+function normalizeListenAddress(host: string, portText: string, raw: string): ListenAddress {
+  const parsedPort = Number(portText);
+  if (!host.trim() || !Number.isInteger(parsedPort) || parsedPort < 0 || parsedPort > 65535) {
+    throw new Error(`Invalid listen address: ${raw}`);
+  }
+  return { host: host.trim(), port: parsedPort };
+}
+
+function formatListenAddress(
+  address: ReturnType<ReturnType<typeof createServer>["address"]>,
+): string {
+  if (!address) {
+    throw new Error("Connector listen address is unavailable");
+  }
+  if (typeof address === "string") {
+    return address;
+  }
+  const host = address.family === "IPv6" ? `[${address.address}]` : address.address;
+  return `${host}:${address.port}`;
+}
+
+function toText(data: unknown): string {
+  if (typeof data === "string") return data;
+  if (Buffer.isBuffer(data)) return data.toString("utf8");
+  if (data instanceof ArrayBuffer) return Buffer.from(data).toString("utf8");
+  if (ArrayBuffer.isView(data)) {
+    return Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString("utf8");
+  }
+  if (Array.isArray(data)) {
+    return Buffer.concat(data.map((part) => Buffer.from(toText(part)))).toString("utf8");
+  }
+  return String(data);
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function optionalRecord(value: unknown): Record<string, unknown> | undefined {
+  return isRecord(value) ? value : undefined;
+}
+
+type RejectedSessionRequest = Extract<SessionRequest, { type: "rejected_request" }>;
+
+interface ParseContext {
+  message: Record<string, unknown>;
+  originalType: string;
+  requestId?: string;
+  reject(code: RejectedSessionRequest["code"], error: string): RejectedSessionRequest;
+  requireRequestId(): string | null;
+  requireField(name: string): string | null;
+}
+
+function createParseContext(message: Record<string, unknown>): ParseContext {
+  const originalType = optionalString(message.type) ?? "unknown";
+  const requestId = optionalString(message.requestId);
+  return {
+    message,
+    originalType,
+    requestId,
+    reject: (code, error) => ({ type: "rejected_request", requestId, originalType, code, error }),
+    requireRequestId: () => requestId ?? null,
+    requireField: (name) => optionalString(message[name]) ?? null,
+  };
+}
+
+function parsePingRequest(context: ParseContext): SessionRequest {
+  const requestId = context.requireRequestId();
+  if (!requestId) return context.reject("invalid_request", "ping requires requestId");
+  return {
+    type: "ping",
+    requestId,
+    clientSentAt: optionalNumber(context.message.clientSentAt),
+  };
+}
+
+function parseFetchAgentsRequest(context: ParseContext): SessionRequest {
+  const requestId = context.requireRequestId();
+  if (!requestId)
+    return context.reject("invalid_request", `${context.originalType} requires requestId`);
+  const type =
+    context.originalType === "fetch_agent_history_request"
+      ? "fetch_agent_history_request"
+      : "fetch_agents_request";
+  return {
+    type,
+    requestId,
+    scope: context.message.scope === "active" ? "active" : undefined,
+    filter: optionalRecord(context.message.filter) as AgentFilter | undefined,
+    sort: Array.isArray(context.message.sort)
+      ? (context.message.sort as FetchAgentsRequest["sort"])
+      : undefined,
+    page: optionalRecord(context.message.page) as FetchAgentsRequest["page"] | undefined,
+    subscribe: optionalRecord(context.message.subscribe) as
+      | FetchAgentsRequest["subscribe"]
+      | undefined,
+  };
+}
+
+function parseFetchAgentRequest(context: ParseContext): SessionRequest {
+  const requestId = context.requireRequestId();
+  const agentId = context.requireField("agentId");
+  if (!requestId || !agentId) {
+    return context.reject("invalid_request", "fetch_agent_request requires requestId and agentId");
+  }
+  return { type: "fetch_agent_request", requestId, agentId };
+}
+
+function parseFetchWorkspacesRequest(context: ParseContext): SessionRequest {
+  const requestId = context.requireRequestId();
+  if (!requestId)
+    return context.reject("invalid_request", "fetch_workspaces_request requires requestId");
+  return {
+    type: "fetch_workspaces_request",
+    requestId,
+    filter: optionalRecord(context.message.filter),
+    sort: Array.isArray(context.message.sort)
+      ? (context.message.sort as FetchWorkspacesRequest["sort"])
+      : undefined,
+    page: optionalRecord(context.message.page) as FetchWorkspacesRequest["page"] | undefined,
+    subscribe: optionalRecord(context.message.subscribe) as
+      | FetchWorkspacesRequest["subscribe"]
+      | undefined,
+  };
+}
+
+function parseTimelineRequest(context: ParseContext): SessionRequest {
+  const requestId = context.requireRequestId();
+  const agentId = context.requireField("agentId");
+  if (!requestId || !agentId) {
+    return context.reject(
+      "invalid_request",
+      "fetch_agent_timeline_request requires requestId and agentId",
+    );
+  }
+  return {
+    type: "fetch_agent_timeline_request",
+    requestId,
+    agentId,
+    direction: parseTimelineDirection(context.message.direction),
+    cursor: optionalRecord(context.message.cursor) as TimelineRequest["cursor"] | undefined,
+    limit: optionalNumber(context.message.limit),
+    projection: parseTimelineProjection(context.message.projection),
+  };
+}
+
+function parseTimelineDirection(value: unknown): TimelineRequest["direction"] {
+  return value === "tail" || value === "before" || value === "after" ? value : undefined;
+}
+
+function parseTimelineProjection(value: unknown): TimelineRequest["projection"] {
+  return value === "projected" || value === "canonical" ? value : undefined;
+}
+
+function parseSendMessageRequest(context: ParseContext): SessionRequest {
+  const requestId = context.requireRequestId();
+  const agentId = context.requireField("agentId");
+  const text = typeof context.message.text === "string" ? context.message.text : null;
+  if (!requestId || !agentId || text === null) {
+    return context.reject(
+      "invalid_request",
+      "send_agent_message_request requires requestId, agentId, and text",
+    );
+  }
+  return {
+    type: "send_agent_message_request",
+    requestId,
+    agentId,
+    text,
+    messageId: optionalString(context.message.messageId),
+  };
+}
+
+function parseCancelAgentRequest(context: ParseContext): SessionRequest {
+  const agentId = context.requireField("agentId");
+  if (!agentId) return context.reject("invalid_request", "cancel_agent_request requires agentId");
+  return { type: "cancel_agent_request", requestId: context.requestId, agentId };
+}
+
+function parseSetVoiceModeRequest(context: ParseContext): SessionRequest {
+  return {
+    type: "set_voice_mode",
+    requestId: context.requestId,
+    enabled: typeof context.message.enabled === "boolean" ? context.message.enabled : undefined,
+    agentId: optionalString(context.message.agentId),
+  };
+}
+
+const sessionRequestParsers: Record<string, (context: ParseContext) => SessionRequest> = {
+  ping: parsePingRequest,
+  fetch_agents_request: parseFetchAgentsRequest,
+  fetch_agent_history_request: parseFetchAgentsRequest,
+  fetch_agent_request: parseFetchAgentRequest,
+  fetch_workspaces_request: parseFetchWorkspacesRequest,
+  fetch_agent_timeline_request: parseTimelineRequest,
+  send_agent_message_request: parseSendMessageRequest,
+  cancel_agent_request: parseCancelAgentRequest,
+  client_heartbeat: () => ({ type: "client_heartbeat" }),
+  register_push_token: (context) => ({
+    type: "register_push_token",
+    token: optionalString(context.message.token),
+  }),
+  audio_played: (context) => ({ type: "audio_played", id: optionalString(context.message.id) }),
+  set_voice_mode: parseSetVoiceModeRequest,
+};
+
+function parseSessionRequest(message: Record<string, unknown>): SessionRequest {
+  const context = createParseContext(message);
+  const parser = sessionRequestParsers[context.originalType];
+  if (!parser) {
+    return context.reject(
+      "unsupported_request",
+      `${context.originalType} is not supported by the xCodex mobile connector`,
+    );
+  }
+  return parser(context);
+}
+
+function stringField(record: Record<string, unknown> | null, keys: string[]): string | null {
+  if (!record) return null;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
+function recordFromUnknown(value: unknown): Record<string, unknown> | null {
+  return isRecord(value) ? value : null;
+}
+
+function encodeCursor(offset: number): string {
+  return Buffer.from(JSON.stringify({ offset }), "utf8").toString("base64url");
+}
+
+function decodeCursor(cursor: string | undefined): number {
+  if (!cursor) return 0;
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+    return typeof parsed.offset === "number" && parsed.offset >= 0 ? Math.floor(parsed.offset) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function statusPriority(agent: AgentSnapshot): number {
+  if ((agent.pendingPermissions?.length ?? 0) > 0 || agent.attentionReason === "permission") {
+    return 0;
+  }
+  if (agent.status === "error" || agent.attentionReason === "error") {
+    return 1;
+  }
+  if (agent.status === "running") {
+    return 2;
+  }
+  if (agent.status === "initializing") {
+    return 3;
+  }
+  return 4;
+}
+
+function compareValues(left: number | string | null, right: number | string | null): number {
+  if (left === right) return 0;
+  if (left === null) return -1;
+  if (right === null) return 1;
+  if (typeof left === "number" && typeof right === "number") {
+    return left < right ? -1 : 1;
+  }
+  return String(left).localeCompare(String(right));
+}
+
+function agentSortValue(agent: AgentSnapshot, key: string): number | string | null {
+  if (key === "status_priority") return statusPriority(agent);
+  if (key === "created_at") return Date.parse(agent.createdAt);
+  if (key === "updated_at") return Date.parse(agent.updatedAt);
+  if (key === "title") return agent.title?.toLocaleLowerCase() ?? "";
+  return null;
+}
+
+function sortAgents(
+  agents: AgentSnapshot[],
+  sort: FetchAgentsRequest["sort"] | undefined,
+): AgentSnapshot[] {
+  const normalized =
+    sort && sort.length > 0 ? sort : [{ key: "updated_at", direction: "desc" } as const];
+  return [...agents].sort((left, right) => {
+    for (const spec of normalized) {
+      const base = compareValues(agentSortValue(left, spec.key), agentSortValue(right, spec.key));
+      if (base !== 0) return spec.direction === "asc" ? base : -base;
+    }
+    return left.id.localeCompare(right.id);
+  });
+}
+
+function matchesLabels(agent: AgentSnapshot, labels?: Record<string, string>) {
+  if (!labels) return true;
+  for (const [key, value] of Object.entries(labels)) {
+    if (agent.labels[key] !== value) return false;
+  }
+  return true;
+}
+
+function matchesProjectKey(project: ProjectPlacement, projectKeys?: string[]) {
+  if (!projectKeys || projectKeys.length === 0) return true;
+  const normalized = new Set(projectKeys.filter((value) => value.trim()));
+  return normalized.size === 0 || normalized.has(project.projectKey);
+}
+
+function matchesThinkingOption(agent: AgentSnapshot, thinkingOptionId: string | null | undefined) {
+  if (thinkingOptionId === undefined) return true;
+  const actual = agent.effectiveThinkingOptionId ?? agent.thinkingOptionId ?? null;
+  return actual === thinkingOptionId;
+}
+
+function matchesAgentFilter(agent: AgentSnapshot, project: ProjectPlacement, filter?: AgentFilter) {
+  if (!filter) return !agent.archivedAt;
+  if (!matchesLabels(agent, filter.labels)) return false;
+  if (!(filter.includeArchived ?? false) && agent.archivedAt) return false;
+  if (filter.statuses?.length && !filter.statuses.includes(agent.status)) return false;
+  if (
+    typeof filter.requiresAttention === "boolean" &&
+    (agent.requiresAttention ?? false) !== filter.requiresAttention
+  ) {
+    return false;
+  }
+  if (!matchesProjectKey(project, filter.projectKeys)) return false;
+  return matchesThinkingOption(agent, filter.thinkingOptionId);
+}
+
+function resolveSubscriptionId(
+  subscribe: { subscriptionId?: string } | undefined,
+  fallbackPrefix: string,
+): string | null {
+  if (!subscribe) return null;
+  return subscribe.subscriptionId?.trim() || `${fallbackPrefix}:${Date.now()}`;
+}
+
+function xcodexThreadIdFromEvent(event: XcodexBridgeAppServerEvent): string | null {
+  const message = recordFromUnknown(event.payload.message);
+  const params = recordFromUnknown(message?.params);
+  return (
+    stringField(params, ["threadId", "thread_id"]) ??
+    stringField(recordFromUnknown(params?.turn), ["threadId", "thread_id"]) ??
+    stringField(recordFromUnknown(params?.item), ["threadId", "thread_id"]) ??
+    stringField(recordFromUnknown(params?.thread), ["id", "threadId", "thread_id"])
+  );
+}
+
+function xcodexEventTimestamp(event: XcodexBridgeAppServerEvent): string {
+  const emittedAtMs =
+    typeof event.payload.emittedAtMs === "number" ? event.payload.emittedAtMs : Date.now();
+  return new Date(emittedAtMs).toISOString();
+}
+
+function xcodexStreamEventFromAppServer(
+  event: XcodexBridgeAppServerEvent,
+): Record<string, unknown> | null {
+  const message = recordFromUnknown(event.payload.message) as AppServerMessage | null;
+  const method = typeof message?.method === "string" ? message.method : "";
+  const params = recordFromUnknown(message?.params);
+  const turn = recordFromUnknown(params?.turn);
+  const status = stringField(turn, ["status"]);
+  const error = recordFromUnknown(turn?.error);
+  const errorMessage =
+    stringField(error, ["message"]) ??
+    stringField(params, ["error", "message"]) ??
+    "xCodex turn failed";
+
+  if (method === "turn/started") {
+    return { type: "turn_started", provider: "xcodex" };
+  }
+  if (method === "turn/failed") {
+    return { type: "turn_failed", provider: "xcodex", error: errorMessage };
+  }
+  if (method === "turn/canceled" || method === "turn/cancelled") {
+    return { type: "turn_canceled", provider: "xcodex", reason: "canceled" };
+  }
+  if (method === "turn/completed") {
+    if (status === "failed") {
+      return { type: "turn_failed", provider: "xcodex", error: errorMessage };
+    }
+    if (status === "canceled" || status === "cancelled") {
+      return { type: "turn_canceled", provider: "xcodex", reason: "canceled" };
+    }
+    return { type: "turn_completed", provider: "xcodex" };
+  }
+  return null;
+}
+
+class ClientSession {
+  private active = false;
+  private agentSubscription: ActiveSubscription<FetchAgentsRequest> | null = null;
+  private workspaceSubscription: ActiveSubscription<FetchWorkspacesRequest> | null = null;
+  private readonly unsubscribeBridgeEvents: () => void;
+
+  constructor(
+    private readonly socket: SocketLike,
+    private readonly bridge: XcodexBridgeClient,
+    private readonly serverId: string,
+    private readonly logger: LoggerLike,
+  ) {
+    this.unsubscribeBridgeEvents = bridge.subscribeEvents((event) => this.handleBridgeEvent(event));
+    socket.on("message", (data) => {
+      void this.handleRawMessage(data);
+    });
+    socket.on("close", () => this.dispose());
+    socket.on("error", (error) => {
+      this.logger.warn({ err: error }, "client_socket_error");
+      this.dispose();
+    });
+  }
+
+  dispose() {
+    this.unsubscribeBridgeEvents();
+  }
+
+  private sendEnvelope(message: Record<string, unknown>) {
+    if (this.socket.readyState !== WebSocket.OPEN) return;
+    this.socket.send(JSON.stringify(message));
+  }
+
+  private sendSession(message: Record<string, unknown>) {
+    this.sendEnvelope({ type: "session", message });
+  }
+
+  private sendRpcError(request: SessionRequest, code: string, error: string) {
+    if (!("requestId" in request) || !request.requestId) return;
+    const requestType = "originalType" in request ? request.originalType : request.type;
+    this.sendSession({
+      type: "rpc_error",
+      payload: {
+        requestId: request.requestId,
+        requestType,
+        code,
+        error,
+      },
+    });
+  }
+
+  private async handleRawMessage(data: unknown) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(toText(data));
+    } catch (error) {
+      this.logger.warn({ err: error }, "invalid_json_message");
+      this.socket.close(1003, "Invalid JSON");
+      return;
+    }
+    if (!isRecord(parsed) || typeof parsed.type !== "string") {
+      this.socket.close(1003, "Invalid message");
+      return;
+    }
+
+    if (parsed.type === "ping") {
+      this.sendEnvelope({ type: "pong" });
+      return;
+    }
+    if (parsed.type === "recording_state") {
+      return;
+    }
+    if (!this.active) {
+      this.handleHello(parsed);
+      return;
+    }
+    if (parsed.type === "hello") {
+      this.socket.close(1002, "Unexpected hello");
+      return;
+    }
+    if (parsed.type !== "session" || !isRecord(parsed.message)) {
+      this.socket.close(1003, "Invalid session message");
+      return;
+    }
+    await this.handleSessionMessage(parseSessionRequest(parsed.message));
+  }
+
+  private handleHello(message: Record<string, unknown>) {
+    if (message.type !== "hello") {
+      this.socket.close(1002, "Missing hello");
+      return;
+    }
+    if (message.protocolVersion !== WS_PROTOCOL_VERSION) {
+      this.socket.close(4002, "Incompatible protocol version");
+      return;
+    }
+    const clientId = typeof message.clientId === "string" ? message.clientId.trim() : "";
+    if (!clientId) {
+      this.socket.close(4003, "Invalid hello");
+      return;
+    }
+    this.active = true;
+    this.logger.info({ clientId }, "client_connected");
+    this.sendSession({
+      type: "status",
+      payload: {
+        status: "server_info",
+        serverId: this.serverId,
+        hostname: hostname(),
+        version: CONNECTOR_VERSION,
+        features: {
+          providersSnapshot: false,
+          checkoutGithubSetAutoMerge: false,
+        },
+        xcodexConnector: {
+          buildTime: CONNECTOR_BUILD_TIME,
+        },
+      },
+    });
+  }
+
+  private async handleSessionMessage(message: SessionRequest) {
+    try {
+      switch (message.type) {
+        case "rejected_request":
+          this.sendRpcError(message, message.code, message.error);
+          return;
+        case "ping":
+          this.sendSession({
+            type: "pong",
+            payload: {
+              requestId: message.requestId,
+              clientSentAt: message.clientSentAt,
+              serverReceivedAt: Date.now(),
+              serverSentAt: Date.now(),
+            },
+          });
+          return;
+        case "fetch_agents_request":
+        case "fetch_agent_history_request":
+          await this.handleFetchAgents(message);
+          return;
+        case "fetch_agent_request":
+          await this.handleFetchAgent(message);
+          return;
+        case "fetch_workspaces_request":
+          await this.handleFetchWorkspaces(message);
+          return;
+        case "fetch_agent_timeline_request":
+          await this.handleFetchTimeline(message);
+          return;
+        case "send_agent_message_request":
+          await this.handleSendMessage(message);
+          return;
+        case "cancel_agent_request":
+          await this.handleCancelAgent(message);
+          return;
+        case "client_heartbeat":
+        case "register_push_token":
+        case "audio_played":
+          return;
+        case "set_voice_mode":
+          this.sendSession({
+            type: "set_voice_mode_response",
+            payload: {
+              requestId: message.requestId ?? `voice-${Date.now()}`,
+              enabled: false,
+              agentId: message.agentId ?? null,
+              accepted: false,
+              error: "Voice mode is not available through the xCodex mobile connector.",
+              reasonCode: "unsupported_connector_capability",
+              retryable: false,
+            },
+          });
+          return;
+      }
+    } catch (error) {
+      this.logger.error({ err: error, type: message.type }, "session_message_failed");
+      this.sendRpcError(message, "request_failed", getErrorMessage(error));
+    }
+  }
+
+  private async handleFetchAgents(request: FetchAgentsRequest) {
+    const subscriptionId = resolveSubscriptionId(request.subscribe, "agents");
+    if (subscriptionId) {
+      this.agentSubscription = { subscriptionId, request };
+    }
+    const payload = await this.listAgentEntries(request);
+    this.sendSession({
+      type:
+        request.type === "fetch_agents_request"
+          ? "fetch_agents_response"
+          : "fetch_agent_history_response",
+      payload: {
+        requestId: request.requestId,
+        ...(subscriptionId ? { subscriptionId } : {}),
+        ...payload,
+      },
+    });
+  }
+
+  private async handleFetchAgent(
+    request: Extract<SessionRequest, { type: "fetch_agent_request" }>,
+  ) {
+    const agent = (await this.bridge.getAgentPayloadById(request.agentId)) as AgentSnapshot | null;
+    this.sendSession({
+      type: "fetch_agent_response",
+      payload: {
+        requestId: request.requestId,
+        agent,
+        project: agent ? this.bridge.buildProjectPlacement(agent as never) : null,
+        error: agent ? null : `Agent not found: ${request.agentId}`,
+      },
+    });
+  }
+
+  private async listAgentEntries(request: FetchAgentsRequest) {
+    const agents = (await this.bridge.listAgentPayloads()) as AgentSnapshot[];
+    const entries = sortAgents(agents, request.sort)
+      .map((agent) => ({
+        agent,
+        project: this.bridge.buildProjectPlacement(agent as never) as ProjectPlacement,
+      }))
+      .filter((entry) => matchesAgentFilter(entry.agent, entry.project, request.filter));
+    const offset = decodeCursor(request.page?.cursor);
+    const limit = Math.min(Math.max(request.page?.limit ?? 200, 1), 200);
+    const pagedEntries = entries.slice(offset, offset + limit);
+    const nextOffset = offset + pagedEntries.length;
+    return {
+      entries: pagedEntries,
+      pageInfo: {
+        nextCursor: nextOffset < entries.length ? encodeCursor(nextOffset) : null,
+        prevCursor: request.page?.cursor ?? null,
+        hasMore: nextOffset < entries.length,
+      },
+    };
+  }
+
+  private async handleFetchWorkspaces(request: FetchWorkspacesRequest) {
+    const subscriptionId = resolveSubscriptionId(request.subscribe, "workspaces");
+    if (subscriptionId) {
+      this.workspaceSubscription = { subscriptionId, request };
+    }
+    const payload = await this.bridge.listWorkspacePayloads(request as never);
+    this.sendSession({
+      type: "fetch_workspaces_response",
+      payload: {
+        requestId: request.requestId,
+        ...(subscriptionId ? { subscriptionId } : {}),
+        ...payload,
+      },
+    });
+  }
+
+  private async handleFetchTimeline(request: TimelineRequest) {
+    const direction = request.direction ?? "tail";
+    const projection = request.projection ?? "projected";
+    const timeline = await this.bridge.fetchTimeline({
+      agentId: request.agentId,
+      direction,
+      projection,
+      cursor: request.cursor?.seq,
+      limit: request.limit,
+    });
+    if (!timeline) {
+      this.sendTimelineError(request, direction, projection, `Agent not found: ${request.agentId}`);
+      return;
+    }
+    const firstEntry = timeline.entries[0];
+    const lastEntry = timeline.entries[timeline.entries.length - 1];
+    this.sendSession({
+      type: "fetch_agent_timeline_response",
+      payload: {
+        requestId: request.requestId,
+        agentId: request.agentId,
+        agent: timeline.agent,
+        direction,
+        projection,
+        epoch: timeline.epoch,
+        reset: false,
+        staleCursor: false,
+        gap: false,
+        window: timeline.window,
+        startCursor: firstEntry ? { epoch: timeline.epoch, seq: firstEntry.seqStart } : null,
+        endCursor: lastEntry ? { epoch: timeline.epoch, seq: lastEntry.seqEnd } : null,
+        hasOlder: firstEntry ? firstEntry.seqStart > timeline.window.minSeq : false,
+        hasNewer: lastEntry ? lastEntry.seqEnd < timeline.window.maxSeq : false,
+        entries: timeline.entries,
+        error: null,
+      },
+    });
+  }
+
+  private sendTimelineError(
+    request: TimelineRequest,
+    direction: "tail" | "before" | "after",
+    projection: "projected" | "canonical",
+    error: string,
+  ) {
+    this.sendSession({
+      type: "fetch_agent_timeline_response",
+      payload: {
+        requestId: request.requestId,
+        agentId: request.agentId,
+        agent: null,
+        direction,
+        projection,
+        epoch: request.agentId,
+        reset: false,
+        staleCursor: false,
+        gap: false,
+        window: { minSeq: 0, maxSeq: 0, nextSeq: 0 },
+        startCursor: null,
+        endCursor: null,
+        hasOlder: false,
+        hasNewer: false,
+        entries: [],
+        error,
+      },
+    });
+  }
+
+  private async handleSendMessage(request: SendMessageRequest) {
+    const result = await this.bridge.sendMessage({
+      agentId: request.agentId,
+      text: request.text,
+      messageId: request.messageId,
+    });
+    this.sendSession({
+      type: "send_agent_message_response",
+      payload: {
+        requestId: request.requestId,
+        agentId: request.agentId,
+        accepted: result.accepted,
+        error: result.accepted ? null : (result.reason ?? "xCodex turn was not accepted"),
+      },
+    });
+  }
+
+  private async handleCancelAgent(request: CancelAgentRequest) {
+    await this.bridge.cancelAgent(request.agentId);
+    const agent = (await this.bridge.getAgentPayloadById(request.agentId)) as AgentSnapshot | null;
+    this.sendSession({
+      type: "cancel_agent_response",
+      payload: {
+        requestId: request.requestId ?? `cancel-${Date.now()}`,
+        agentId: request.agentId,
+        agent,
+      },
+    });
+  }
+
+  private handleBridgeEvent(event: XcodexBridgeAppServerEvent) {
+    if (!this.active) return;
+    const threadId = xcodexThreadIdFromEvent(event);
+    if (!threadId) return;
+    const agentId = `xcodex:${event.payload.workspaceId}:${threadId}`;
+    const streamEvent = xcodexStreamEventFromAppServer(event);
+    if (streamEvent) {
+      this.sendSession({
+        type: "agent_stream",
+        payload: {
+          agentId,
+          event: streamEvent,
+          timestamp: xcodexEventTimestamp(event),
+          seq: typeof event.seq === "number" ? event.seq : undefined,
+          epoch: agentId,
+        },
+      });
+    }
+    void this.forwardAgentUpdate(agentId);
+    void this.forwardWorkspaceUpdate(event.payload.workspaceId);
+  }
+
+  private async forwardAgentUpdate(agentId: string) {
+    if (!this.agentSubscription) return;
+    const agent = (await this.bridge.getAgentPayloadById(agentId)) as AgentSnapshot | null;
+    if (!agent) {
+      this.sendSession({ type: "agent_update", payload: { kind: "remove", agentId } });
+      return;
+    }
+    const project = this.bridge.buildProjectPlacement(agent as never) as ProjectPlacement;
+    const payload = matchesAgentFilter(agent, project, this.agentSubscription.request.filter)
+      ? { kind: "upsert", agent, project }
+      : { kind: "remove", agentId };
+    this.sendSession({ type: "agent_update", payload });
+  }
+
+  private async forwardWorkspaceUpdate(workspaceId: string) {
+    if (!this.workspaceSubscription) return;
+    const payload = await this.bridge.listWorkspacePayloads(
+      this.workspaceSubscription.request as never,
+    );
+    const workspace = payload.entries.find((entry: { id: string }) => entry.id === workspaceId);
+    this.sendSession({
+      type: "workspace_update",
+      payload: workspace ? { kind: "upsert", workspace } : { kind: "remove", id: workspaceId },
+    });
+  }
+}
+
+async function generatePairingOffer(options: {
+  paseoHome: string;
+  relayEndpoint: string;
+  relayUseTls: boolean;
+  appBaseUrl: string;
+  logger: LoggerLike;
+}) {
+  await mkdir(options.paseoHome, { recursive: true });
+  const serverId = getOrCreateServerId(options.paseoHome, { logger: options.logger });
+  const daemonKeyPair = await loadOrCreateDaemonKeyPair(options.paseoHome, options.logger as never);
+  const offer = await createConnectionOfferV2({
+    serverId,
+    daemonPublicKeyB64: daemonKeyPair.publicKeyB64,
+    relay: { endpoint: options.relayEndpoint, useTls: options.relayUseTls },
+  });
+  return {
+    relayEnabled: true,
+    url: encodeOfferToFragmentUrl({ offer, appBaseUrl: options.appBaseUrl }),
+    qr: null,
+  };
+}
+
+async function startConnector(options: ServerOptions) {
+  await mkdir(options.paseoHome, { recursive: true });
+  await acquirePidLock(options.paseoHome, null);
+
+  const serverId = getOrCreateServerId(options.paseoHome, { logger: options.logger });
+  const daemonKeyPair = await loadOrCreateDaemonKeyPair(options.paseoHome, options.logger as never);
+  const bridge = createXcodexBridgeClient({ logger: options.logger as never });
+  const wsServer = new WebSocketServer({ noServer: true });
+  let relay: RelayTransportController | null = null;
+
+  const server = createServer((request, response) => {
+    if (request.url === "/api/health") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          ok: true,
+          serverId,
+          relayEnabled: options.relayEnabled,
+          relayEndpoint: options.relayEndpoint,
+          version: CONNECTOR_VERSION,
+        }),
+      );
+      return;
+    }
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: false, error: "not_found" }));
+  });
+
+  const attachSocket = async (socket: SocketLike) => {
+    const session = new ClientSession(
+      socket,
+      bridge,
+      serverId,
+      options.logger.child({ client: "mobile" }),
+    );
+    void session;
+  };
+
+  wsServer.on("connection", (socket) => {
+    void attachSocket(socket);
+  });
+
+  server.on("upgrade", (request: IncomingMessage, socket, head) => {
+    if (request.url?.split("?")[0] !== "/ws") {
+      socket.destroy();
+      return;
+    }
+    wsServer.handleUpgrade(request, socket, head, (webSocket) => {
+      wsServer.emit("connection", webSocket, request);
+    });
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(options.listen.port, options.listen.host, () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+
+  const listen = formatListenAddress(server.address());
+  await updatePidLock(options.paseoHome, { listen });
+
+  if (options.relayEnabled) {
+    relay = startRelayTransport({
+      logger: options.logger as never,
+      attachSocket,
+      relayEndpoint: options.relayEndpoint,
+      relayUseTls: options.relayUseTls,
+      serverId,
+      daemonKeyPair: daemonKeyPair.keyPair,
+    });
+  }
+
+  options.logger.info(
+    {
+      listen,
+      serverId,
+      relayEnabled: options.relayEnabled,
+      relayEndpoint: options.relayEndpoint,
+    },
+    "xcodex_mobile_connector_started",
+  );
+
+  async function shutdown() {
+    options.logger.info({}, "xcodex_mobile_connector_stopping");
+    await relay?.stop().catch((error) => options.logger.warn({ err: error }, "relay_stop_failed"));
+    await new Promise<void>((resolve) => wsServer.close(() => resolve()));
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await releasePidLock(options.paseoHome);
+  }
+
+  process.once("SIGINT", () => {
+    void shutdown().finally(() => process.exit(0));
+  });
+  process.once("SIGTERM", () => {
+    void shutdown().finally(() => process.exit(0));
+  });
+}
+
+async function main() {
+  const logger = createLogger({ module: "xcodex-mobile-connector" });
+  const options = {
+    paseoHome: resolvePaseoHome(),
+    listen: parseListenAddress(getEnvString("PASEO_LISTEN", "127.0.0.1:6767")),
+    relayEnabled: getEnvBoolean("PASEO_RELAY_ENABLED", true),
+    relayEndpoint: getEnvString("PASEO_RELAY_ENDPOINT", DEFAULT_RELAY_ENDPOINT),
+    relayUseTls: getEnvBoolean("PASEO_RELAY_USE_TLS", true),
+    appBaseUrl: getEnvString("PASEO_APP_BASE_URL", DEFAULT_APP_BASE_URL),
+    logger,
+  } satisfies ServerOptions;
+
+  if (process.argv.includes("--print-pairing")) {
+    const pairing = await generatePairingOffer({ ...options, logger: createSilentLogger() });
+    process.stdout.write(JSON.stringify(pairing));
+    return;
+  }
+
+  await startConnector(options);
+}
+
+main().catch((error) => {
+  console.error(getErrorMessage(error));
+  process.exit(1);
+});

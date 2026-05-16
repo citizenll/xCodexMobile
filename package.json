@@ -42,6 +42,7 @@
     "build": "npm run build --workspaces --if-present",
     "build:highlight": "npm run build --workspace=@getpaseo/highlight",
     "build:daemon": "npm run build --workspace=@getpaseo/highlight && npm run build --workspace=@getpaseo/relay && npm run build --workspace=@getpaseo/server && npm run build --workspace=@getpaseo/cli",
+    "build:xcodex-connector": "npm run build:xcodex-connector --workspace=@getpaseo/server",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "typecheck:daemon": "npm run typecheck --workspace=@getpaseo/relay && npm run typecheck --workspace=@getpaseo/server && npm run typecheck --workspace=@getpaseo/cli",
     "test": "npm run test --workspaces --if-present",
