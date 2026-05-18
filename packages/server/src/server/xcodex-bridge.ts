@@ -41,6 +41,17 @@ const DEFAULT_LOCAL_INFO_FILE = path.join(
   "xcodex-host-bridge.json",
 );
 const XCODEX_MOBILE_ATTACHMENT_DIR = "xcodex-mobile-attachments";
+const HOST_BRIDGE_V1_REQUEST_TIMEOUT_MS = 10_000;
+const HOST_BRIDGE_V2_DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
+const HOST_BRIDGE_V2_THREAD_CREATE_REQUEST_TIMEOUT_MS = 60_000;
+const HOST_BRIDGE_V2_EVENT_SUBSCRIBE_TIMEOUT_MS = 15_000;
+
+export interface XcodexBridgeClientTimeouts {
+  v1RequestMs?: number;
+  v2DefaultRequestMs?: number;
+  v2ThreadCreateRequestMs?: number;
+  v2EventSubscribeMs?: number;
+}
 
 const HostBridgeInfoSchema = z.object({
   protocolVersion: z.number().int().positive().optional(),
@@ -287,6 +298,20 @@ const HostBridgeThreadCreateResponseSchema = z.object({
   threadId: z.string().min(1),
   turnId: z.string().nullable().optional(),
 });
+
+function positiveTimeoutMs(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function hostBridgeV2RequestTimeoutMs(kind: string, timeouts?: XcodexBridgeClientTimeouts): number {
+  if (kind === "thread.create") {
+    return positiveTimeoutMs(
+      timeouts?.v2ThreadCreateRequestMs,
+      HOST_BRIDGE_V2_THREAD_CREATE_REQUEST_TIMEOUT_MS,
+    );
+  }
+  return positiveTimeoutMs(timeouts?.v2DefaultRequestMs, HOST_BRIDGE_V2_DEFAULT_REQUEST_TIMEOUT_MS);
+}
 
 export interface XcodexBridgeClient {
   isVirtualAgentId(agentId: string): boolean;
@@ -900,8 +925,10 @@ async function listWorkspacePayloadsFromAgents(params: {
 export function createXcodexBridgeClient(options: {
   logger: pino.Logger;
   infoFile?: string;
+  timeouts?: XcodexBridgeClientTimeouts;
 }): XcodexBridgeClient {
   const logger = options.logger.child({ module: "xcodex-bridge" });
+  const timeouts = options.timeouts;
   const explicitInfoFile = options.infoFile ?? process.env.XCODEX_HOST_BRIDGE_INFO_PATH ?? null;
   const candidateInfoFiles = explicitInfoFile
     ? [explicitInfoFile]
@@ -924,10 +951,13 @@ export function createXcodexBridgeClient(options: {
     const { info } = await readInfo();
     return await new Promise<unknown>((resolve, reject) => {
       const client = createConnection({ host: "127.0.0.1", port: info.port });
-      const timeout = setTimeout(() => {
-        client.destroy();
-        reject(new Error("xCodex host bridge request timed out"));
-      }, 10_000);
+      const timeout = setTimeout(
+        () => {
+          client.destroy();
+          reject(new Error("xCodex host bridge request timed out"));
+        },
+        positiveTimeoutMs(timeouts?.v1RequestMs, HOST_BRIDGE_V1_REQUEST_TIMEOUT_MS),
+      );
       let buffer = "";
       client.setEncoding("utf8");
       client.on("connect", () => {
@@ -970,10 +1000,11 @@ export function createXcodexBridgeClient(options: {
     const { info } = await readInfo();
     return await new Promise<unknown>((resolve, reject) => {
       const client = createConnection({ host: "127.0.0.1", port: info.port });
+      const timeoutMs = hostBridgeV2RequestTimeoutMs(kind, timeouts);
       const timeout = setTimeout(() => {
         client.destroy();
-        reject(new Error("xCodex host bridge v2 request timed out"));
-      }, 15_000);
+        reject(new Error(`xCodex host bridge v2 request timed out for ${kind}`));
+      }, timeoutMs);
       timeout.unref?.();
       let buffer = "";
       const id = randomUUID();
@@ -1080,9 +1111,12 @@ export function createXcodexBridgeClient(options: {
     const id = randomUUID();
     let buffer = "";
     let acknowledged = false;
-    const timeout = setTimeout(() => {
-      socket.destroy(new Error("xCodex host bridge event subscription timed out"));
-    }, 15_000);
+    const timeout = setTimeout(
+      () => {
+        socket.destroy(new Error("xCodex host bridge event subscription timed out"));
+      },
+      positiveTimeoutMs(timeouts?.v2EventSubscribeMs, HOST_BRIDGE_V2_EVENT_SUBSCRIBE_TIMEOUT_MS),
+    );
     timeout.unref?.();
 
     socket.setEncoding("utf8");

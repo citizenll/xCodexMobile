@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createServer } from "node:net";
+import { createServer, type Socket } from "node:net";
 import { afterEach, test, expect } from "vitest";
 import pino from "pino";
 import { createXcodexBridgeClient } from "./xcodex-bridge.js";
@@ -12,6 +12,12 @@ import {
 } from "./messages.js";
 
 const tempDirs: string[] = [];
+
+interface HostBridgeTestRequest {
+  kind?: string;
+  id?: string;
+  [key: string]: unknown;
+}
 
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
@@ -43,6 +49,40 @@ async function expectRichMobileMessageRequest(requests: unknown[]) {
   await expect(readFile(imagePath as string)).resolves.toEqual(Buffer.from("image-bytes"));
 }
 
+function writeDelayedThreadCreateResponse(socket: Socket, request: HostBridgeTestRequest) {
+  setTimeout(() => {
+    socket.end(
+      JSON.stringify({
+        kind: "response",
+        id: request.id,
+        ok: true,
+        data: {
+          accepted: true,
+          threadId: "thread-delayed",
+          turnId: "turn-delayed",
+          agent: {
+            id: "xcodex:workspace-1:thread-delayed",
+            workspaceId: "workspace-1",
+            workspaceName: "xCodex",
+            cwd: "D:\\Dev\\self\\x-codex-worktree",
+            threadId: "thread-delayed",
+            title: "Delayed thread",
+            preview: "hello",
+            modelProvider: "provider-1",
+            providerId: "provider-1",
+            supplierId: "supplier-1",
+            modelId: "model-1",
+            createdAtMs: 1_700_000_000_000,
+            updatedAtMs: 1_700_000_001_000,
+            archivedAtMs: null,
+            state: "active",
+          },
+        },
+      }) + "\n",
+    );
+  }, 75);
+}
+
 test("projects xCodex host bridge agents and timeline into Paseo payloads", async () => {
   const requests: unknown[] = [];
   const server = createServer((socket) => {
@@ -52,7 +92,7 @@ test("projects xCodex host bridge agents and timeline into Paseo payloads", asyn
       buffer += chunk;
       const newline = buffer.indexOf("\n");
       if (newline < 0) return;
-      const request = JSON.parse(buffer.slice(0, newline));
+      const request = JSON.parse(buffer.slice(0, newline)) as HostBridgeTestRequest;
       requests.push(request);
       if (request.kind === "getAgent") {
         socket.end(
@@ -410,6 +450,115 @@ test("projects xCodex host bridge agents and timeline into Paseo payloads", asyn
         payload: {
           cwd: "D:\\Dev\\self\\x-codex-worktree",
         },
+      }),
+    );
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("uses the create-agent timeout budget for UI-mediated xCodex thread creation", async () => {
+  const requests: unknown[] = [];
+  const server = createServer((socket) => {
+    let buffer = "";
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => {
+      buffer += chunk;
+      const newline = buffer.indexOf("\n");
+      if (newline < 0) return;
+      const request = JSON.parse(buffer.slice(0, newline));
+      requests.push(request);
+      if (request.kind === "runtime.catalog") {
+        socket.end(
+          JSON.stringify({
+            kind: "response",
+            id: request.id,
+            ok: true,
+            data: {
+              generatedAtMs: 1_700_000_000_000,
+              providers: [
+                {
+                  id: "provider-1",
+                  label: "Provider 1",
+                  defaultSupplierId: "supplier-1",
+                  supportsSupplierSwitching: true,
+                },
+              ],
+              suppliers: [
+                {
+                  id: "supplier-1",
+                  label: "Supplier 1",
+                  wireApi: "openai",
+                },
+              ],
+              route: null,
+              models: [
+                {
+                  id: "model-1",
+                  label: "Model 1",
+                  providerId: "provider-1",
+                  supplierId: "supplier-1",
+                },
+              ],
+            },
+          }) + "\n",
+        );
+        return;
+      }
+      if (request.kind === "thread.create") {
+        writeDelayedThreadCreateResponse(socket, request);
+      }
+    });
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("missing test server address");
+    const dir = await mkdtemp(path.join(tmpdir(), "xcodex-bridge-test-"));
+    tempDirs.push(dir);
+    const infoFile = path.join(dir, "xcodex-host-bridge.json");
+    await writeFile(
+      infoFile,
+      JSON.stringify({ protocolVersion: 2, port: address.port, token: "secret" }),
+      "utf8",
+    );
+
+    const bridge = createXcodexBridgeClient({
+      logger: createLogger(),
+      infoFile,
+      timeouts: {
+        v2DefaultRequestMs: 25,
+        v2ThreadCreateRequestMs: 250,
+      },
+    });
+
+    await expect(
+      bridge.createAgent({
+        workspaceId: "workspace-1",
+        config: {
+          provider: "xcodex",
+          cwd: "D:\\Dev\\self\\x-codex-worktree",
+          model: "auto",
+        },
+        initialPrompt: "hello",
+        clientMessageId: "message-1",
+      }),
+    ).resolves.toMatchObject({
+      id: "xcodex:workspace-1:thread-delayed",
+      model: "model-1",
+    });
+    expect(requests).toContainEqual(
+      expect.objectContaining({
+        kind: "thread.create",
+        payload: expect.objectContaining({
+          workspaceId: "workspace-1",
+          providerId: "provider-1",
+          supplierId: "supplier-1",
+          modelId: "model-1",
+          text: "hello",
+          messageId: "message-1",
+        }),
       }),
     );
   } finally {
