@@ -50,7 +50,7 @@ jobs:
           release_args=(
             release create "$RELEASE_TAG"
             --repo "${{ github.repository }}"
-            --title "Paseo $RELEASE_TAG"
+            --title "xCodex $RELEASE_TAG"
             --notes ""
           )
 
@@ -117,16 +117,49 @@ jobs:
             exit 1
           fi
 
-          asset_name="paseo-${RELEASE_TAG}-android.apk"
+          asset_name="xcodex-${RELEASE_TAG}-android-arm64.apk"
           asset_path="$RUNNER_TEMP/$asset_name"
+          checksum_path="$asset_path.sha256"
 
           curl --fail --location --output "$asset_path" "$artifact_url"
+          (cd "$RUNNER_TEMP" && sha256sum "$asset_name" > "$asset_name.sha256")
 
           echo "asset_name=$asset_name" >> "$GITHUB_OUTPUT"
           echo "asset_path=$asset_path" >> "$GITHUB_OUTPUT"
+          echo "checksum_path=$checksum_path" >> "$GITHUB_OUTPUT"
+
+      - name: Validate APK artifact
+        shell: bash
+        env:
+          APK_PATH: ${{ steps.artifact.outputs.asset_path }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require("node:fs");
+          const cp = require("node:child_process");
+
+          const apkPath = process.env.APK_PATH;
+          const size = fs.statSync(apkPath).size;
+          const entries = cp.execFileSync("unzip", ["-Z1", apkPath], { encoding: "utf8" })
+            .split(/\r?\n/)
+            .filter(Boolean);
+          const libArchs = new Set(
+            entries
+              .filter((entry) => entry.startsWith("lib/") && entry.endsWith(".so"))
+              .map((entry) => entry.split("/")[1])
+          );
+
+          const unexpectedArchs = [...libArchs].filter((arch) => arch !== "arm64-v8a");
+          if (!libArchs.has("arm64-v8a") || unexpectedArchs.length > 0) {
+            throw new Error(`Expected arm64-v8a-only APK, got native ABIs: ${[...libArchs].join(", ") || "(none)"}`);
+          }
+
+          console.log(`APK size: ${(size / 1024 / 1024).toFixed(1)} MB`);
+          console.log(`Native ABIs: ${[...libArchs].join(", ")}`);
+          NODE
 
       - name: Upload APK to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "$RELEASE_TAG" "${{ steps.artifact.outputs.asset_path }}" --clobber --repo "${{ github.repository }}"
+          gh release upload "$RELEASE_TAG" "${{ steps.artifact.outputs.asset_path }}" "${{ steps.artifact.outputs.checksum_path }}" --clobber --repo "${{ github.repository }}"

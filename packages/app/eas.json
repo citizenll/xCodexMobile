@@ -27,6 +27,10 @@
     "production-apk": {
       "extends": "production",
       "distribution": "internal",
+      "env": {
+        "APP_VARIANT": "production",
+        "XCODEX_ANDROID_BUILD_ARCHS": "arm64-v8a"
+      },
       "android": {
         "buildType": "apk",
         "gradleCommand": ":app:assembleRelease -x lint -x lintVitalAnalyzeRelease -x lintVitalRelease -x generateReleaseLintModel -x generateReleaseLintVitalModel"

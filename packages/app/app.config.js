@@ -2,6 +2,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 const pkg = require("./package.json");
 const appVariant = process.env.APP_VARIANT ?? "production";
+const androidBuildArchs = (process.env.XCODEX_ANDROID_BUILD_ARCHS ?? "")
+  .split(",")
+  .map((arch) => arch.trim())
+  .filter(Boolean);
 
 function resolveSecretFile(params) {
   const fromEnv = process.env[params.envKey];
@@ -137,11 +141,17 @@ export default {
           android: {
             minSdkVersion: 29,
             kotlinVersion: "2.1.20",
+            enableMinifyInReleaseBuilds: true,
+            enableShrinkResourcesInReleaseBuilds: true,
+            networkInspector: appVariant === "development",
             // Allow HTTP connections for local network hosts in release builds
             usesCleartextTraffic: true,
+            ...(androidBuildArchs.length > 0 ? { buildArchs: androidBuildArchs } : {}),
           },
         },
       ],
+      "./plugins/with-xcodex-android-build",
+      "./plugins/with-xcodex-android-icons",
     ],
     experiments: {
       typedRoutes: true,
