@@ -30,6 +30,7 @@ import {
   createXcodexStreamEventMapper,
   isXcodexTurnLifecycleAppServerEvent,
 } from "./stream-events.js";
+import { resolveEventWorkspaceUpsertPayload } from "./workspace-updates.js";
 
 declare const __XCODEX_CONNECTOR_VERSION__: string;
 declare const __XCODEX_CONNECTOR_BUILD_TIME__: string;
@@ -1698,14 +1699,15 @@ class ClientSession {
 
   private async forwardWorkspaceUpdate(workspaceId: string) {
     if (!this.workspaceSubscription) return;
-    const payload = await this.bridge.listWorkspacePayloads(
-      this.workspaceSubscription.request as never,
-    );
-    const workspace = payload.entries.find((entry: { id: string }) => entry.id === workspaceId);
-    this.sendSession({
-      type: "workspace_update",
-      payload: workspace ? { kind: "upsert", workspace } : { kind: "remove", id: workspaceId },
+    const payload = await resolveEventWorkspaceUpsertPayload({
+      workspaceId,
+      listWorkspacePayloads: (request) => this.bridge.listWorkspacePayloads(request as never),
     });
+    if (!payload) {
+      this.logger.debug({ workspaceId }, "xcodex_workspace_update_skipped_without_descriptor");
+      return;
+    }
+    this.sendSession({ type: "workspace_update", payload });
   }
 }
 
