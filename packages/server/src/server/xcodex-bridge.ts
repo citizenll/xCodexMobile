@@ -43,12 +43,14 @@ const DEFAULT_LOCAL_INFO_FILE = path.join(
 const XCODEX_MOBILE_ATTACHMENT_DIR = "xcodex-mobile-attachments";
 const HOST_BRIDGE_V1_REQUEST_TIMEOUT_MS = 10_000;
 const HOST_BRIDGE_V2_DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
-const HOST_BRIDGE_V2_THREAD_CREATE_REQUEST_TIMEOUT_MS = 60_000;
+const HOST_BRIDGE_V2_MESSAGE_SEND_REQUEST_TIMEOUT_MS = 45_000;
+const HOST_BRIDGE_V2_THREAD_CREATE_REQUEST_TIMEOUT_MS = 130_000;
 const HOST_BRIDGE_V2_EVENT_SUBSCRIBE_TIMEOUT_MS = 15_000;
 
 export interface XcodexBridgeClientTimeouts {
   v1RequestMs?: number;
   v2DefaultRequestMs?: number;
+  v2MessageSendRequestMs?: number;
   v2ThreadCreateRequestMs?: number;
   v2EventSubscribeMs?: number;
 }
@@ -304,6 +306,12 @@ function positiveTimeoutMs(value: number | undefined, fallback: number): number 
 }
 
 function hostBridgeV2RequestTimeoutMs(kind: string, timeouts?: XcodexBridgeClientTimeouts): number {
+  if (kind === "message.send") {
+    return positiveTimeoutMs(
+      timeouts?.v2MessageSendRequestMs,
+      HOST_BRIDGE_V2_MESSAGE_SEND_REQUEST_TIMEOUT_MS,
+    );
+  }
   if (kind === "thread.create") {
     return positiveTimeoutMs(
       timeouts?.v2ThreadCreateRequestMs,

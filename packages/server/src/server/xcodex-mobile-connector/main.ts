@@ -1343,22 +1343,34 @@ class ClientSession {
 
   private async handleSendMessage(request: SendMessageRequest) {
     this.trackAgentInterest(request.agentId);
-    const result = await this.bridge.sendMessage({
-      agentId: request.agentId,
-      text: request.text,
-      messageId: request.messageId,
-      images: request.images,
-      attachments: request.attachments,
-    });
-    this.sendSession({
-      type: "send_agent_message_response",
-      payload: {
-        requestId: request.requestId,
+    try {
+      const result = await this.bridge.sendMessage({
         agentId: request.agentId,
-        accepted: result.accepted,
-        error: result.accepted ? null : (result.reason ?? "xCodex turn was not accepted"),
-      },
-    });
+        text: request.text,
+        messageId: request.messageId,
+        images: request.images,
+        attachments: request.attachments,
+      });
+      this.sendSession({
+        type: "send_agent_message_response",
+        payload: {
+          requestId: request.requestId,
+          agentId: request.agentId,
+          accepted: result.accepted,
+          error: result.accepted ? null : (result.reason ?? "xCodex turn was not accepted"),
+        },
+      });
+    } catch (error) {
+      this.sendSession({
+        type: "send_agent_message_response",
+        payload: {
+          requestId: request.requestId,
+          agentId: request.agentId,
+          accepted: false,
+          error: getErrorMessage(error),
+        },
+      });
+    }
   }
 
   private async handleCreateAgent(request: CreateAgentRequest) {

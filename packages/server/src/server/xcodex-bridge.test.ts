@@ -83,6 +83,22 @@ function writeDelayedThreadCreateResponse(socket: Socket, request: HostBridgeTes
   }, 75);
 }
 
+function writeDelayedMessageSendResponse(socket: Socket, request: HostBridgeTestRequest) {
+  setTimeout(() => {
+    socket.end(
+      JSON.stringify({
+        kind: "response",
+        id: request.id,
+        ok: true,
+        data: {
+          accepted: true,
+          turnId: "turn-delayed",
+        },
+      }) + "\n",
+    );
+  }, 75);
+}
+
 test("projects xCodex host bridge agents and timeline into Paseo payloads", async () => {
   const requests: unknown[] = [];
   const server = createServer((socket) => {
@@ -557,6 +573,67 @@ test("uses the create-agent timeout budget for UI-mediated xCodex thread creatio
           supplierId: "supplier-1",
           modelId: "model-1",
           text: "hello",
+          messageId: "message-1",
+        }),
+      }),
+    );
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("uses the message-send timeout budget for xCodex desktop acknowledgements", async () => {
+  const requests: unknown[] = [];
+  const server = createServer((socket) => {
+    let buffer = "";
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => {
+      buffer += chunk;
+      const newline = buffer.indexOf("\n");
+      if (newline < 0) return;
+      const request = JSON.parse(buffer.slice(0, newline));
+      requests.push(request);
+      if (request.kind === "message.send") {
+        writeDelayedMessageSendResponse(socket, request);
+      }
+    });
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("missing test server address");
+    const dir = await mkdtemp(path.join(tmpdir(), "xcodex-bridge-test-"));
+    tempDirs.push(dir);
+    const infoFile = path.join(dir, "xcodex-host-bridge.json");
+    await writeFile(
+      infoFile,
+      JSON.stringify({ protocolVersion: 2, port: address.port, token: "secret" }),
+      "utf8",
+    );
+
+    const bridge = createXcodexBridgeClient({
+      logger: createLogger(),
+      infoFile,
+      timeouts: {
+        v2DefaultRequestMs: 25,
+        v2MessageSendRequestMs: 250,
+      },
+    });
+
+    await expect(
+      bridge.sendMessage({
+        agentId: "xcodex:workspace-1:thread-1",
+        text: "from mobile",
+        messageId: "message-1",
+      }),
+    ).resolves.toMatchObject({ accepted: true, turnId: "turn-delayed" });
+    expect(requests).toContainEqual(
+      expect.objectContaining({
+        kind: "message.send",
+        payload: expect.objectContaining({
+          agentId: "xcodex:workspace-1:thread-1",
+          text: "from mobile",
           messageId: "message-1",
         }),
       }),

@@ -608,6 +608,176 @@ test("sends create_agent_request with string workspace ids", async () => {
   await expect(createPromise).rejects.toThrow("compat test sentinel");
 });
 
+test("createAgent keeps waiting beyond the xCodex bridge creation budget", async () => {
+  vi.useFakeTimers();
+  try {
+    const logger = createMockLogger();
+    const mock = createMockTransport();
+
+    const client = new DaemonClient({
+      url: "ws://test",
+      clientId: "clsk_unit_test",
+      logger,
+      reconnect: { enabled: false },
+      transportFactory: () => mock.transport,
+    });
+    clients.push(client);
+
+    const connectPromise = client.connect();
+    mock.triggerOpen();
+    await connectPromise;
+
+    const createPromise = client.createAgent({
+      provider: "xcodex",
+      cwd: "/tmp/project",
+      workspaceId: "workspace-1",
+      initialPrompt: "hello",
+    });
+    const settled = vi.fn();
+    const observed = createPromise.then(
+      () => ({ status: "resolved" as const, error: null }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+    void observed.then((result) => settled(result.status));
+
+    expect(mock.sent).toHaveLength(1);
+    const request = parseSentFrame(mock.sent[0]);
+    expect(request.type).toBe("create_agent_request");
+
+    await vi.advanceTimersByTimeAsync(130_000);
+    expect(settled).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    const result = await observed;
+    expect(result.status).toBe("rejected");
+    expect(result.error).toBeInstanceOf(Error);
+    expect((result.error as Error).message).toContain("Timeout waiting for message (150000ms)");
+    expect(settled).toHaveBeenCalledWith("rejected");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("createAgent supports an explicit shorter timeout for tests and tools", async () => {
+  vi.useFakeTimers();
+  try {
+    const logger = createMockLogger();
+    const mock = createMockTransport();
+
+    const client = new DaemonClient({
+      url: "ws://test",
+      clientId: "clsk_unit_test",
+      logger,
+      reconnect: { enabled: false },
+      transportFactory: () => mock.transport,
+    });
+    clients.push(client);
+
+    const connectPromise = client.connect();
+    mock.triggerOpen();
+    await connectPromise;
+
+    const createPromise = client.createAgent({
+      provider: "codex",
+      cwd: "/tmp/project",
+      timeoutMs: 25,
+    });
+    const observed = createPromise.then(
+      () => ({ status: "resolved" as const, error: null }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+
+    await vi.advanceTimersByTimeAsync(25);
+    const result = await observed;
+    expect(result.status).toBe("rejected");
+    expect(result.error).toBeInstanceOf(Error);
+    expect((result.error as Error).message).toContain("Timeout waiting for message (25ms)");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("sendAgentMessage keeps waiting for the xCodex send acknowledgement budget", async () => {
+  vi.useFakeTimers();
+  try {
+    const logger = createMockLogger();
+    const mock = createMockTransport();
+
+    const client = new DaemonClient({
+      url: "ws://test",
+      clientId: "clsk_unit_test",
+      logger,
+      reconnect: { enabled: false },
+      transportFactory: () => mock.transport,
+    });
+    clients.push(client);
+
+    const connectPromise = client.connect();
+    mock.triggerOpen();
+    await connectPromise;
+
+    const sendPromise = client.sendAgentMessage("xcodex:workspace-1:thread-1", "hello");
+    const settled = vi.fn();
+    const observed = sendPromise.then(
+      () => ({ status: "resolved" as const, error: null }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+    void observed.then((result) => settled(result.status));
+
+    expect(mock.sent).toHaveLength(1);
+    const request = parseSentFrame(mock.sent[0]);
+    expect(request.type).toBe("send_agent_message_request");
+
+    await vi.advanceTimersByTimeAsync(45_000);
+    expect(settled).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    const result = await observed;
+    expect(result.status).toBe("rejected");
+    expect(result.error).toBeInstanceOf(Error);
+    expect((result.error as Error).message).toContain("Timeout waiting for message (60000ms)");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("sendAgentMessage supports an explicit shorter timeout", async () => {
+  vi.useFakeTimers();
+  try {
+    const logger = createMockLogger();
+    const mock = createMockTransport();
+
+    const client = new DaemonClient({
+      url: "ws://test",
+      clientId: "clsk_unit_test",
+      logger,
+      reconnect: { enabled: false },
+      transportFactory: () => mock.transport,
+    });
+    clients.push(client);
+
+    const connectPromise = client.connect();
+    mock.triggerOpen();
+    await connectPromise;
+
+    const sendPromise = client.sendAgentMessage("xcodex:workspace-1:thread-1", "hello", {
+      timeoutMs: 25,
+    });
+    const observed = sendPromise.then(
+      () => ({ status: "resolved" as const, error: null }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+
+    await vi.advanceTimersByTimeAsync(25);
+    const result = await observed;
+    expect(result.status).toBe("rejected");
+    expect(result.error).toBeInstanceOf(Error);
+    expect((result.error as Error).message).toContain("Timeout waiting for message (25ms)");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test("sends structured attachments with create_agent_request", async () => {
   const logger = createMockLogger();
   const mock = createMockTransport();

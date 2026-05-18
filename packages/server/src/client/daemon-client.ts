@@ -244,6 +244,7 @@ export interface SendMessageOptions {
   messageId?: string;
   images?: Array<{ data: string; mimeType: string }>;
   attachments?: SendAgentMessageRequest["attachments"];
+  timeoutMs?: number;
 }
 
 type AgentConfigOverrides = Partial<Omit<AgentSessionConfig, "provider" | "cwd">>;
@@ -262,6 +263,7 @@ export interface CreateAgentRequestOptions extends AgentConfigOverrides {
   worktreeName?: string;
   requestId?: string;
   labels?: Record<string, string>;
+  timeoutMs?: number;
 }
 
 export interface CreatePaseoWorktreeInput extends Pick<
@@ -709,12 +711,18 @@ class DaemonRpcError extends Error {
 const DEFAULT_RECONNECT_BASE_DELAY_MS = 1500;
 const DEFAULT_RECONNECT_MAX_DELAY_MS = 30000;
 const DEFAULT_CONNECT_TIMEOUT_MS = 15000;
+const DEFAULT_SEND_AGENT_MESSAGE_TIMEOUT_MS = 60000;
+const DEFAULT_CREATE_AGENT_TIMEOUT_MS = 150000;
 
 /** Default timeout for waiting for connection before sending queued messages */
 const DEFAULT_SEND_QUEUE_TIMEOUT_MS = 10000;
 const DEFAULT_DICTATION_FINISH_ACCEPT_TIMEOUT_MS = 15000;
 const DEFAULT_DICTATION_FINISH_FALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_DICTATION_FINISH_TIMEOUT_GRACE_MS = 5000;
+
+function positiveTimeoutMs(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
+}
 
 function isWaiterTimeoutError(error: unknown): boolean {
   return error instanceof Error && error.message.startsWith("Timeout waiting for message");
@@ -1846,7 +1854,7 @@ export class DaemonClient {
     const status = await this.sendRequest({
       requestId,
       message,
-      timeout: 60000,
+      timeout: positiveTimeoutMs(options.timeoutMs, DEFAULT_CREATE_AGENT_TIMEOUT_MS),
       options: { skipQueue: true },
       select: (msg) => {
         if (msg.type !== "status") {
@@ -2134,7 +2142,7 @@ export class DaemonClient {
     const payload = await this.sendRequest({
       requestId,
       message,
-      timeout: 15000,
+      timeout: positiveTimeoutMs(options?.timeoutMs, DEFAULT_SEND_AGENT_MESSAGE_TIMEOUT_MS),
       options: { skipQueue: true },
       select: (msg) => {
         if (msg.type !== "send_agent_message_response") {
@@ -4670,6 +4678,7 @@ function resolveAgentConfig(options: CreateAgentRequestOptions): AgentSessionCon
     worktreeName: _worktreeName,
     requestId: _requestId,
     labels: _labels,
+    timeoutMs: _timeoutMs,
     ...overrides
   } = options;
 
