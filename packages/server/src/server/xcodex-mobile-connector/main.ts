@@ -26,10 +26,8 @@ import {
   type CreateAgentRequestMessage,
   type SendAgentMessageRequest,
 } from "../../shared/messages.js";
-import {
-  createXcodexStreamEventMapper,
-  isXcodexTurnLifecycleAppServerEvent,
-} from "./stream-events.js";
+import { createXcodexStreamEventMapper } from "./stream-events.js";
+import { buildXcodexBridgeEventRoute } from "./event-routing.js";
 import { resolveEventWorkspaceUpsertPayload } from "./workspace-updates.js";
 
 declare const __XCODEX_CONNECTOR_VERSION__: string;
@@ -832,21 +830,6 @@ function parseSessionRequest(message: Record<string, unknown>): SessionRequest {
   return parser(context);
 }
 
-function stringField(record: Record<string, unknown> | null, keys: string[]): string | null {
-  if (!record) return null;
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "string" && value.trim().length > 0) {
-      return value.trim();
-    }
-  }
-  return null;
-}
-
-function recordFromUnknown(value: unknown): Record<string, unknown> | null {
-  return isRecord(value) ? value : null;
-}
-
 function encodeCursor(offset: number): string {
   return Buffer.from(JSON.stringify({ offset }), "utf8").toString("base64url");
 }
@@ -953,29 +936,13 @@ function resolveSubscriptionId(
   return subscribe.subscriptionId?.trim() || `${fallbackPrefix}:${Date.now()}`;
 }
 
-function xcodexThreadIdFromEvent(event: XcodexBridgeAppServerEvent): string | null {
-  const message = recordFromUnknown(event.payload.message);
-  const params = recordFromUnknown(message?.params);
-  return (
-    stringField(params, ["threadId", "thread_id"]) ??
-    stringField(recordFromUnknown(params?.turn), ["threadId", "thread_id"]) ??
-    stringField(recordFromUnknown(params?.item), ["threadId", "thread_id"]) ??
-    stringField(recordFromUnknown(params?.thread), ["id", "threadId", "thread_id"])
-  );
-}
-
-function xcodexEventTimestamp(event: XcodexBridgeAppServerEvent): string {
-  const emittedAtMs =
-    typeof event.payload.emittedAtMs === "number" ? event.payload.emittedAtMs : Date.now();
-  return new Date(emittedAtMs).toISOString();
-}
-
 class ClientSession {
   private active = false;
   private clientId: string | null = null;
   private disposed = false;
   private agentSubscription: ActiveSubscription<FetchAgentsRequest> | null = null;
   private workspaceSubscription: ActiveSubscription<FetchWorkspacesRequest> | null = null;
+  private readonly interestedAgentIds = new Set<string>();
   private readonly xcodexStreamEvents: ReturnType<typeof createXcodexStreamEventMapper>;
   private readonly unsubscribeBridgeEvents: () => void;
 
@@ -986,7 +953,7 @@ class ClientSession {
     private readonly serverId: string,
     private readonly logger: LoggerLike,
     private readonly tracker: MobileClientConnectionTracker,
-    private readonly realtimeStreamingEnabled: boolean,
+    realtimeStreamingEnabled: boolean,
   ) {
     this.xcodexStreamEvents = createXcodexStreamEventMapper({ realtimeStreamingEnabled });
     this.unsubscribeBridgeEvents = bridge.subscribeEvents((event) => this.handleBridgeEvent(event));
@@ -1022,6 +989,22 @@ class ClientSession {
 
   private sendSession(message: Record<string, unknown>) {
     this.sendEnvelope({ type: "session", message });
+  }
+
+  private trackAgentInterest(agentId: string) {
+    if (!agentId.trim()) return;
+    this.interestedAgentIds.delete(agentId);
+    this.interestedAgentIds.add(agentId);
+
+    while (this.interestedAgentIds.size > 64) {
+      const oldest = this.interestedAgentIds.keys().next().value;
+      if (!oldest) break;
+      this.interestedAgentIds.delete(oldest);
+    }
+  }
+
+  private hasAgentInterest(agentId: string): boolean {
+    return this.interestedAgentIds.has(agentId);
   }
 
   private sendRpcError(request: SessionRequest, code: string, error: string) {
@@ -1238,6 +1221,7 @@ class ClientSession {
   private async handleFetchAgent(
     request: Extract<SessionRequest, { type: "fetch_agent_request" }>,
   ) {
+    this.trackAgentInterest(request.agentId);
     const agent = (await this.bridge.getAgentPayloadById(request.agentId)) as AgentSnapshot | null;
     this.sendSession({
       type: "fetch_agent_response",
@@ -1289,6 +1273,7 @@ class ClientSession {
   }
 
   private async handleFetchTimeline(request: TimelineRequest) {
+    this.trackAgentInterest(request.agentId);
     const direction = request.direction ?? "tail";
     const projection = request.projection ?? "projected";
     const timeline = await this.bridge.fetchTimeline({
@@ -1357,6 +1342,7 @@ class ClientSession {
   }
 
   private async handleSendMessage(request: SendMessageRequest) {
+    this.trackAgentInterest(request.agentId);
     const result = await this.bridge.sendMessage({
       agentId: request.agentId,
       text: request.text,
@@ -1394,6 +1380,7 @@ class ClientSession {
           agent,
         },
       });
+      this.trackAgentInterest(agent.id);
       this.sendAgentUpsert(agent);
       const workspaceId = agent.labels["xcodex.workspaceId"];
       if (workspaceId) {
@@ -1412,6 +1399,7 @@ class ClientSession {
   }
 
   private async handleCancelAgent(request: CancelAgentRequest) {
+    this.trackAgentInterest(request.agentId);
     await this.bridge.cancelAgent(request.agentId);
     const agent = (await this.bridge.getAgentPayloadById(request.agentId)) as AgentSnapshot | null;
     this.sendSession({
@@ -1425,6 +1413,7 @@ class ClientSession {
   }
 
   private async handleSetAgentModel(request: SetAgentModelRequest) {
+    this.trackAgentInterest(request.agentId);
     try {
       const route = await this.bridge.getThreadRuntime(request.agentId);
       if (!route?.providerId || !route.supplierId) {
@@ -1504,6 +1493,7 @@ class ClientSession {
   }
 
   private async handleXcodexRuntimeCatalog(request: XcodexRuntimeCatalogRequest) {
+    this.trackAgentInterest(request.agentId);
     try {
       const catalog = await this.bridge.runtimeCatalog({
         agentId: request.agentId,
@@ -1532,6 +1522,7 @@ class ClientSession {
   }
 
   private async handleXcodexThreadRuntimeSet(request: XcodexThreadRuntimeSetRequest) {
+    this.trackAgentInterest(request.agentId);
     try {
       const result = await this.bridge.setThreadRuntime({
         agentId: request.agentId,
@@ -1654,27 +1645,20 @@ class ClientSession {
 
   private handleBridgeEvent(event: XcodexBridgeAppServerEvent) {
     if (!this.active) return;
-    const threadId = xcodexThreadIdFromEvent(event);
-    if (!threadId) return;
-    const agentId = `xcodex:${event.payload.workspaceId}:${threadId}`;
-    const streamEvent = this.xcodexStreamEvents.fromAppServer(event);
-    if (streamEvent) {
-      this.sendSession({
-        type: "agent_stream",
-        payload: {
-          agentId,
-          event: streamEvent,
-          timestamp: xcodexEventTimestamp(event),
-          seq: typeof event.seq === "number" ? event.seq : undefined,
-          epoch: agentId,
-        },
-      });
+    const route = buildXcodexBridgeEventRoute({
+      event,
+      hasAgentInterest: (agentId) => this.hasAgentInterest(agentId),
+      mapStreamEvent: (bridgeEvent) => this.xcodexStreamEvents.fromAppServer(bridgeEvent),
+    });
+    if (!route) return;
+    if (route.agentStreamPayload) {
+      this.sendSession({ type: "agent_stream", payload: route.agentStreamPayload });
     }
-    if (!this.realtimeStreamingEnabled && !isXcodexTurnLifecycleAppServerEvent(event)) {
+    if (!route.refreshDirectory) {
       return;
     }
-    void this.forwardAgentUpdate(agentId);
-    void this.forwardWorkspaceUpdate(event.payload.workspaceId);
+    void this.forwardAgentUpdate(route.agentId);
+    void this.forwardWorkspaceUpdate(route.workspaceId);
   }
 
   private async forwardAgentUpdate(agentId: string) {

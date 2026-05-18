@@ -698,6 +698,27 @@ describe("processAgentStreamEvent", () => {
     expect(result.sideEffects).toEqual([]);
   });
 
+  it("applies live timeline events without canonical seq metadata", () => {
+    const existingCursor: TimelineCursor = {
+      epoch: "epoch-1",
+      startSeq: 1,
+      endSeq: 42,
+    };
+
+    const result = processAgentStreamEvent({
+      ...baseStreamInput,
+      event: makeTimelineEvent("bridge live chunk"),
+      seq: undefined,
+      epoch: undefined,
+      currentCursor: existingCursor,
+    });
+
+    expect(result.changedHead).toBe(true);
+    expect(result.cursorChanged).toBe(false);
+    expect(result.cursor).toBe(null);
+    expect(result.sideEffects).toEqual([]);
+  });
+
   it("detects gap and emits catch-up side effect", () => {
     const existingCursor: TimelineCursor = {
       epoch: "epoch-1",
