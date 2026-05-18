@@ -20,8 +20,10 @@ import {
 } from "../xcodex-bridge.js";
 import { DEFAULT_APP_BASE_URL, DEFAULT_RELAY_ENDPOINT } from "../../shared/product-defaults.js";
 import {
+  CreateAgentRequestMessageSchema,
   SendAgentMessageRequestSchema,
   type AgentAttachment,
+  type CreateAgentRequestMessage,
   type SendAgentMessageRequest,
 } from "../../shared/messages.js";
 import {
@@ -134,6 +136,17 @@ interface SendMessageRequest {
   attachments?: AgentAttachment[];
 }
 
+interface CreateAgentRequest {
+  type: "create_agent_request";
+  requestId: string;
+  workspaceId?: string;
+  config: CreateAgentRequestMessage["config"];
+  initialPrompt?: string;
+  clientMessageId?: string;
+  images?: CreateAgentRequestMessage["images"];
+  attachments?: CreateAgentRequestMessage["attachments"];
+}
+
 interface CancelAgentRequest {
   type: "cancel_agent_request";
   requestId?: string;
@@ -198,6 +211,7 @@ type SessionRequest =
   | FetchWorkspacesRequest
   | TimelineRequest
   | SendMessageRequest
+  | CreateAgentRequest
   | CancelAgentRequest
   | SetAgentModelRequest
   | ProvidersSnapshotRequest
@@ -598,6 +612,31 @@ function parseSendMessageRequest(context: ParseContext): SessionRequest {
   };
 }
 
+function parseCreateAgentRequest(context: ParseContext): SessionRequest {
+  const requestId = context.requireRequestId();
+  if (!requestId) {
+    return context.reject("invalid_request", "create_agent_request requires requestId");
+  }
+  const parsed = CreateAgentRequestMessageSchema.safeParse({
+    ...context.message,
+    type: "create_agent_request",
+    requestId,
+  });
+  if (!parsed.success) {
+    return context.reject("invalid_request", "create_agent_request payload is invalid");
+  }
+  return {
+    type: "create_agent_request",
+    requestId,
+    workspaceId: parsed.data.workspaceId,
+    config: parsed.data.config,
+    initialPrompt: parsed.data.initialPrompt,
+    clientMessageId: parsed.data.clientMessageId,
+    images: parsed.data.images,
+    attachments: parsed.data.attachments,
+  };
+}
+
 function parseCancelAgentRequest(context: ParseContext): SessionRequest {
   const agentId = context.requireField("agentId");
   if (!agentId) return context.reject("invalid_request", "cancel_agent_request requires agentId");
@@ -762,6 +801,7 @@ const sessionRequestParsers: Record<string, (context: ParseContext) => SessionRe
   fetch_workspaces_request: parseFetchWorkspacesRequest,
   fetch_agent_timeline_request: parseTimelineRequest,
   send_agent_message_request: parseSendMessageRequest,
+  create_agent_request: parseCreateAgentRequest,
   cancel_agent_request: parseCancelAgentRequest,
   set_agent_model_request: parseSetAgentModelRequest,
   get_providers_snapshot_request: parseProvidersSnapshotRequest,
@@ -1116,6 +1156,9 @@ class ClientSession {
       case "send_agent_message_request":
         await this.handleSendMessage(message);
         return true;
+      case "create_agent_request":
+        await this.handleCreateAgent(message);
+        return true;
       case "cancel_agent_request":
         await this.handleCancelAgent(message);
         return true;
@@ -1331,6 +1374,42 @@ class ClientSession {
     });
   }
 
+  private async handleCreateAgent(request: CreateAgentRequest) {
+    try {
+      const agent = (await this.bridge.createAgent({
+        workspaceId: request.workspaceId,
+        config: request.config,
+        initialPrompt: request.initialPrompt,
+        clientMessageId: request.clientMessageId,
+        images: request.images,
+        attachments: request.attachments,
+      })) as AgentSnapshot;
+      this.sendSession({
+        type: "status",
+        payload: {
+          status: "agent_created",
+          requestId: request.requestId,
+          agentId: agent.id,
+          agent,
+        },
+      });
+      this.sendAgentUpsert(agent);
+      const workspaceId = agent.labels["xcodex.workspaceId"];
+      if (workspaceId) {
+        void this.forwardWorkspaceUpdate(workspaceId);
+      }
+    } catch (error) {
+      this.sendSession({
+        type: "status",
+        payload: {
+          status: "agent_create_failed",
+          requestId: request.requestId,
+          error: getErrorMessage(error),
+        },
+      });
+    }
+  }
+
   private async handleCancelAgent(request: CancelAgentRequest) {
     await this.bridge.cancelAgent(request.agentId);
     const agent = (await this.bridge.getAgentPayloadById(request.agentId)) as AgentSnapshot | null;
@@ -1497,8 +1576,8 @@ class ClientSession {
   }
 
   private async buildProvidersSnapshotEntries() {
-    const catalog = await this.bridge.runtimeCatalog({ includeModels: false });
-    if (!catalog) {
+    const entry = await this.bridge.providersSnapshotEntry();
+    if (!entry) {
       return [
         {
           provider: "xcodex",
@@ -1512,17 +1591,7 @@ class ClientSession {
         },
       ];
     }
-    return [
-      {
-        provider: "xcodex",
-        status: "ready",
-        enabled: true,
-        label: "xCodex",
-        description: "Remote control for xCodex desktop threads",
-        models: [],
-        fetchedAt: new Date(catalog.generatedAtMs).toISOString(),
-      },
-    ];
+    return [entry];
   }
 
   private async handleFileExplorer(request: FileExplorerRequest) {

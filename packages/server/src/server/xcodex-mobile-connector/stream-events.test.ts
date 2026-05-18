@@ -277,6 +277,48 @@ test("default mapper only forwards turn lifecycle events", () => {
   );
 });
 
+test("default mapper forwards xCodex user ingress without enabling realtime streaming", () => {
+  const mapper = createXcodexStreamEventMapper();
+
+  const desktopIngress = expectValidStreamEvent(
+    mapper.fromAppServer(
+      appServerEvent("x-codex/desktop/ingress", {
+        text: "sent from desktop",
+        sourceMessageId: "desktop-msg-1",
+      }),
+    ),
+  );
+
+  expect(desktopIngress).toMatchObject({
+    type: "timeline",
+    provider: "xcodex",
+    item: {
+      type: "user_message",
+      text: "sent from desktop",
+      messageId: "desktop-msg-1",
+    },
+  });
+
+  const mobileIngress = expectValidStreamEvent(
+    mapper.fromAppServer(
+      appServerEvent("x-codex/mobile/ingress", {
+        text: "sent from mobile",
+        sourceMessageId: "mobile-msg-1",
+      }),
+    ),
+  );
+
+  expect(mobileIngress).toMatchObject({
+    type: "timeline",
+    provider: "xcodex",
+    item: {
+      type: "user_message",
+      text: "sent from mobile",
+      messageId: "mobile-msg-1",
+    },
+  });
+});
+
 test("identifies turn lifecycle events for non-realtime subscription updates", () => {
   expect(isXcodexTurnLifecycleAppServerEvent(appServerEvent("turn/started", {}))).toBe(true);
   expect(

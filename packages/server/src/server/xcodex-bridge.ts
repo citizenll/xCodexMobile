@@ -19,11 +19,17 @@ import {
   deriveAgentStateBucket,
   getWorkspaceStateBucketPriority,
 } from "../shared/agent-state-bucket.js";
-import type { AgentAttachment, SendAgentMessageRequest } from "../shared/messages.js";
+import type {
+  AgentAttachment,
+  CreateAgentRequestMessage,
+  SendAgentMessageRequest,
+} from "../shared/messages.js";
+import type { AgentModelDefinition, ProviderSnapshotEntry } from "./agent/agent-sdk-types.js";
 import { SortablePager } from "./pagination/sortable-pager.js";
 
 const XCODEX_AGENT_PROVIDER = "xcodex";
 const XCODEX_AGENT_PREFIX = "xcodex:";
+const XCODEX_ROUTE_MODEL_PREFIX = "xcodex-route:";
 const DEFAULT_ROAMING_INFO_FILE = path.join(
   process.env.APPDATA ?? path.join(homedir(), "AppData", "Roaming"),
   "ai.xcodex.citizenl",
@@ -120,6 +126,13 @@ const HostBridgeRuntimeCatalogSchema = z.object({
   models: z.array(HostBridgeRuntimeModelSchema).optional(),
 });
 
+const XcodexRouteModelRefSchema = z.object({
+  providerId: z.string().min(1),
+  supplierId: z.string().min(1),
+  modelId: z.string().min(1),
+  realProviderOverride: z.string().nullable().optional(),
+});
+
 const HostBridgeTimelineEntrySchema = z.object({
   seq: z.number().int().nonnegative(),
   timestamp: z.string(),
@@ -184,7 +197,9 @@ type HostBridgeAgent = z.infer<typeof HostBridgeAgentSchema>;
 type HostBridgeTimeline = z.infer<typeof HostBridgeTimelineSchema>;
 type HostBridgeTimelineEntry = z.infer<typeof HostBridgeTimelineEntrySchema>;
 type HostBridgeRuntimeRoute = z.infer<typeof HostBridgeRuntimeRouteSchema>;
+type HostBridgeRuntimeModel = z.infer<typeof HostBridgeRuntimeModelSchema>;
 type HostBridgeRuntimeCatalog = z.infer<typeof HostBridgeRuntimeCatalogSchema>;
+type XcodexRouteModelRef = z.infer<typeof XcodexRouteModelRefSchema>;
 export type XcodexBridgeAppServerEvent = z.infer<typeof HostBridgeV2EventSchema>;
 type AgentTimelineEntryPayload = Extract<
   SessionOutboundMessage,
@@ -266,6 +281,13 @@ const HostBridgeProjectIconPayloadSchema = z.object({
     .nullable(),
 });
 
+const HostBridgeThreadCreateResponseSchema = z.object({
+  accepted: z.boolean(),
+  agent: HostBridgeAgentSchema,
+  threadId: z.string().min(1),
+  turnId: z.string().nullable().optional(),
+});
+
 export interface XcodexBridgeClient {
   isVirtualAgentId(agentId: string): boolean;
   subscribeEvents(listener: (event: XcodexBridgeAppServerEvent) => void): () => void;
@@ -296,6 +318,14 @@ export interface XcodexBridgeClient {
     images?: SendAgentMessageRequest["images"];
     attachments?: AgentAttachment[];
   }): Promise<{ accepted: boolean; turnId?: string | null; reason?: string | null }>;
+  createAgent(params: {
+    workspaceId?: string;
+    config: CreateAgentRequestMessage["config"];
+    initialPrompt?: string;
+    clientMessageId?: string;
+    images?: CreateAgentRequestMessage["images"];
+    attachments?: CreateAgentRequestMessage["attachments"];
+  }): Promise<AgentSnapshotPayload>;
   cancelAgent(agentId: string): Promise<{
     accepted: boolean;
     turnId?: string | null;
@@ -311,6 +341,7 @@ export interface XcodexBridgeClient {
     threadId?: string;
     includeModels?: boolean;
   }): Promise<HostBridgeRuntimeCatalog | null>;
+  providersSnapshotEntry(): Promise<ProviderSnapshotEntry | null>;
   getThreadRuntime(agentId: string): Promise<HostBridgeRuntimeRoute | null>;
   setThreadRuntime(params: {
     agentId: string;
@@ -324,6 +355,99 @@ export interface XcodexBridgeClient {
     route: HostBridgeRuntimeRoute;
     agent: AgentSnapshotPayload | null;
   }>;
+}
+
+function encodeXcodexRouteModelId(route: XcodexRouteModelRef): string {
+  const encoded = Buffer.from(JSON.stringify(route), "utf8").toString("base64url");
+  return `${XCODEX_ROUTE_MODEL_PREFIX}${encoded}`;
+}
+
+function decodeXcodexRouteModelId(modelId: string | null | undefined): XcodexRouteModelRef | null {
+  const trimmed = modelId?.trim();
+  if (!trimmed?.startsWith(XCODEX_ROUTE_MODEL_PREFIX)) {
+    return null;
+  }
+  try {
+    const raw = Buffer.from(trimmed.slice(XCODEX_ROUTE_MODEL_PREFIX.length), "base64url").toString(
+      "utf8",
+    );
+    const parsed = XcodexRouteModelRefSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+function runtimeModelRouteRef(model: HostBridgeRuntimeModel): XcodexRouteModelRef {
+  return {
+    providerId: model.providerId,
+    supplierId: model.supplierId,
+    modelId: model.id,
+  };
+}
+
+function routeMatchesModel(
+  route: HostBridgeRuntimeRoute | null | undefined,
+  model: HostBridgeRuntimeModel,
+): boolean {
+  return (
+    route?.providerId === model.providerId &&
+    route?.supplierId === model.supplierId &&
+    route?.modelId === model.id
+  );
+}
+
+function buildXcodexProviderSnapshotEntry(
+  catalog: HostBridgeRuntimeCatalog,
+  fetchedAt: string,
+): ProviderSnapshotEntry {
+  const providerById = new Map(catalog.providers.map((provider) => [provider.id, provider]));
+  const supplierById = new Map(catalog.suppliers.map((supplier) => [supplier.id, supplier]));
+  let hasDefault = false;
+  const models = (catalog.models ?? []).map<AgentModelDefinition>((model, index) => {
+    const provider = providerById.get(model.providerId);
+    const supplier = supplierById.get(model.supplierId);
+    const isDefault = routeMatchesModel(catalog.route, model) || (!catalog.route && index === 0);
+    if (isDefault) {
+      hasDefault = true;
+    }
+    const entry: AgentModelDefinition = {
+      provider: XCODEX_AGENT_PROVIDER,
+      id: encodeXcodexRouteModelId(runtimeModelRouteRef(model)),
+      label: [
+        provider?.label ?? model.providerId,
+        supplier?.label ?? model.supplierId,
+        model.label || model.id,
+      ].join(" / "),
+      metadata: {
+        xcodexRuntime: {
+          providerId: model.providerId,
+          supplierId: model.supplierId,
+          modelId: model.id,
+          contextWindow: model.contextWindow ?? null,
+          inputModalities: model.inputModalities ?? [],
+          supportsFastServiceTier: model.supportsFastServiceTier === true,
+          disabledReason: model.disabledReason ?? null,
+        },
+      },
+    };
+    if (isDefault) {
+      entry.isDefault = true;
+    }
+    return entry;
+  });
+  if (!hasDefault && models[0]) {
+    models[0].isDefault = true;
+  }
+  return {
+    provider: XCODEX_AGENT_PROVIDER,
+    status: "ready",
+    enabled: true,
+    label: "xCodex",
+    description: "Remote control for xCodex desktop threads",
+    models,
+    fetchedAt,
+  };
 }
 
 function toIso(ms: number): string {
@@ -380,7 +504,7 @@ async function writeXcodexMobileImageAttachment(image: {
 async function buildXcodexMobileInputItems(params: {
   text: string;
   inputItems?: unknown[];
-  images?: SendAgentMessageRequest["images"];
+  images?: SendAgentMessageRequest["images"] | CreateAgentRequestMessage["images"];
   attachments?: AgentAttachment[];
 }): Promise<unknown[] | undefined> {
   const hasImages = (params.images?.length ?? 0) > 0;
@@ -418,6 +542,18 @@ function capabilities(): AgentSnapshotPayload["capabilities"] {
     supportsReasoningStream: true,
     supportsToolInvocations: true,
   };
+}
+
+function firstRouteModelRef(catalog: HostBridgeRuntimeCatalog | null): XcodexRouteModelRef | null {
+  const models = catalog?.models ?? [];
+  if (models.length === 0) {
+    return null;
+  }
+  const selected =
+    models.find((model) => routeMatchesModel(catalog?.route, model)) ??
+    models.find((model) => !model.disabledReason) ??
+    models[0];
+  return selected ? runtimeModelRouteRef(selected) : null;
 }
 
 function toAgentPayload(agent: HostBridgeAgent): AgentSnapshotPayload {
@@ -1102,6 +1238,47 @@ export function createXcodexBridgeClient(options: {
         })
         .parse(data);
     },
+    async createAgent({
+      workspaceId,
+      config,
+      initialPrompt,
+      clientMessageId,
+      images,
+      attachments,
+    }) {
+      if (config.provider !== XCODEX_AGENT_PROVIDER) {
+        throw new Error(`Not an xCodex provider: ${config.provider}`);
+      }
+      const catalog = await this.runtimeCatalog({
+        ...(workspaceId ? { workspaceId } : {}),
+        includeModels: true,
+      });
+      const route = decodeXcodexRouteModelId(config.model) ?? firstRouteModelRef(catalog);
+      if (!route) {
+        throw new Error("xCodex runtime catalog has no selectable models");
+      }
+      const text = initialPrompt ?? "";
+      const inputItems = await buildXcodexMobileInputItems({
+        text,
+        images,
+        attachments,
+      });
+      const data = await requestV2("thread.create", {
+        ...(workspaceId ? { workspaceId } : {}),
+        providerId: route.providerId,
+        supplierId: route.supplierId,
+        modelId: route.modelId,
+        ...(route.realProviderOverride ? { realProviderOverride: route.realProviderOverride } : {}),
+        text,
+        ...(clientMessageId ? { messageId: clientMessageId } : {}),
+        ...(inputItems ? { inputItems } : {}),
+      });
+      const parsed = HostBridgeThreadCreateResponseSchema.parse(data);
+      if (!parsed.accepted) {
+        throw new Error("xCodex thread create was not accepted");
+      }
+      return toAgentPayload(parsed.agent);
+    },
     async cancelAgent(agentId) {
       if (!agentId.startsWith(XCODEX_AGENT_PREFIX)) {
         throw new Error(`Not an xCodex virtual agent: ${agentId}`);
@@ -1128,6 +1305,16 @@ export function createXcodexBridgeClient(options: {
       );
       return data ? HostBridgeRuntimeCatalogSchema.parse(data) : null;
     },
+    async providersSnapshotEntry() {
+      const catalog = await this.runtimeCatalog({ includeModels: true });
+      if (!catalog) {
+        return null;
+      }
+      return buildXcodexProviderSnapshotEntry(
+        catalog,
+        new Date(catalog.generatedAtMs).toISOString(),
+      );
+    },
     async getThreadRuntime(agentId) {
       if (!agentId.startsWith(XCODEX_AGENT_PREFIX)) {
         throw new Error(`Not an xCodex virtual agent: ${agentId}`);
@@ -1150,12 +1337,20 @@ export function createXcodexBridgeClient(options: {
       if (!agentId.startsWith(XCODEX_AGENT_PREFIX)) {
         throw new Error(`Not an xCodex virtual agent: ${agentId}`);
       }
+      const decodedModelRoute = decodeXcodexRouteModelId(modelId);
+      const effectiveProviderId = decodedModelRoute?.providerId ?? providerId;
+      const effectiveSupplierId = decodedModelRoute?.supplierId ?? supplierId;
+      const effectiveModelId = decodedModelRoute?.modelId ?? modelId;
+      const effectiveRealProviderOverride =
+        decodedModelRoute?.realProviderOverride ?? realProviderOverride;
       const data = await requestV2("thread.runtime.set", {
         agentId,
-        providerId,
-        supplierId,
-        ...(modelId === undefined ? {} : { modelId }),
-        ...(realProviderOverride === undefined ? {} : { realProviderOverride }),
+        providerId: effectiveProviderId,
+        supplierId: effectiveSupplierId,
+        ...(effectiveModelId === undefined ? {} : { modelId: effectiveModelId }),
+        ...(effectiveRealProviderOverride === undefined
+          ? {}
+          : { realProviderOverride: effectiveRealProviderOverride }),
         ...(typeof expectedUpdatedAtMs === "number" ? { expectedUpdatedAtMs } : {}),
       });
       const parsed = z

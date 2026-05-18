@@ -152,6 +152,32 @@ function turnLifecycleEvent(
   return { type: "turn_completed", provider: XCODEX_PROVIDER };
 }
 
+function userIngressEvent(
+  method: string,
+  params: Record<string, unknown> | null,
+): AgentStreamEventPayload | null {
+  if (method !== "x-codex/mobile/ingress" && method !== "x-codex/desktop/ingress") {
+    return null;
+  }
+  const text = textField(params, ["text", "content", "message"]);
+  if (text === null) {
+    return null;
+  }
+  const messageId = stringField(params, [
+    "sourceMessageId",
+    "source_message_id",
+    "messageId",
+    "message_id",
+    "ingressId",
+    "ingress_id",
+  ]);
+  return timeline({
+    type: "user_message",
+    text,
+    ...(messageId ? { messageId } : {}),
+  });
+}
+
 export function isXcodexTurnLifecycleAppServerEvent(event: XcodexBridgeAppServerEvent): boolean {
   const { method, params } = messageParams(event);
   return turnLifecycleEvent(method, params) !== null;
@@ -483,6 +509,11 @@ export class XcodexStreamEventMapper {
     if (lifecycleEvent) {
       this.clearThreadDeltaState(threadId);
       return lifecycleEvent;
+    }
+
+    const ingressEvent = userIngressEvent(method, params);
+    if (ingressEvent) {
+      return ingressEvent;
     }
 
     if (!this.realtimeStreamingEnabled) {
