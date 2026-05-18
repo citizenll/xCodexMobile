@@ -13,6 +13,7 @@ import { Check, CircleHelp, X } from "lucide-react-native";
 import type { PendingPermission } from "@/types/shared";
 import type { AgentPermissionResponse } from "@server/server/agent/agent-sdk-types";
 import { isWeb } from "@/constants/platform";
+import { t } from "@/i18n";
 
 interface QuestionOption {
   label: string;
@@ -179,7 +180,7 @@ function QuestionOtherInput({
     <TextInput
       // @ts-expect-error - outlineStyle is web-only
       style={otherInputStyle}
-      placeholder="Other..."
+      placeholder={t("Other...")}
       placeholderTextColor={theme.colors.foregroundMuted}
       value={value}
       onChangeText={handleChange}
@@ -393,7 +394,7 @@ export function QuestionFormCard({ permission, onRespond, isResponding }: Questi
           ) : (
             <View style={styles.actionContent}>
               <X size={14} color={theme.colors.foregroundMuted} />
-              <Text style={dismissActionTextStyle}>Dismiss</Text>
+              <Text style={dismissActionTextStyle}>{t("Dismiss")}</Text>
             </View>
           )}
         </Pressable>
@@ -404,7 +405,7 @@ export function QuestionFormCard({ permission, onRespond, isResponding }: Questi
           ) : (
             <View style={styles.actionContent}>
               <Check size={14} color={submitActionTextColor} />
-              <Text style={submitActionTextStyle}>Submit</Text>
+              <Text style={submitActionTextStyle}>{t("Submit")}</Text>
             </View>
           )}
         </Pressable>

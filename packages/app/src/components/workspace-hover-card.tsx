@@ -23,6 +23,7 @@ import type { PrHint } from "@/git/use-pr-status-query";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { PrBadge } from "@/components/sidebar-workspace-list";
 import { useHoverSafeZone } from "@/hooks/use-hover-safe-zone";
+import { t } from "@/i18n";
 
 interface Rect {
   x: number;
@@ -274,7 +275,7 @@ function WorkspaceHoverCardContent({
           collapsable={false}
           onLayout={handleLayout}
           accessibilityRole="menu"
-          accessibilityLabel="Workspace scripts"
+          accessibilityLabel={t("Workspace scripts")}
           testID="workspace-hover-card"
           style={cardStyle}
         >
@@ -384,7 +385,7 @@ function ChecksSummaryContent({
       ) : (
         <ThemedGitHubIcon size={12} uniProps={iconUniProps} />
       )}
-      <Text style={labelStyle}>Checks</Text>
+      <Text style={labelStyle}>{t("Checks")}</Text>
       <View style={styles.checksSummaryCounts}>
         <ChecksSummaryPill count={passed} kind="passed" />
         <ChecksSummaryPill count={failed} kind="failed" />

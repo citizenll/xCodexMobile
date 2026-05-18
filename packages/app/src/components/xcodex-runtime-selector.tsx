@@ -5,6 +5,7 @@ import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { Check, ChevronDown, Cpu, RefreshCw } from "lucide-react-native";
 import { AdaptiveModalSheet } from "@/components/adaptive-modal-sheet";
 import { useToast } from "@/contexts/toast-context";
+import { t } from "@/i18n";
 import { toErrorMessage } from "@/utils/error-messages";
 import type { DaemonClient } from "@server/client/daemon-client";
 import type {
@@ -196,7 +197,7 @@ function describeModel(model: XcodexRuntimeModel): string {
 }
 
 function resolveSelectedModelLabel(models: XcodexRuntimeModel[], modelId?: string | null): string {
-  return models.find((model) => model.id === modelId)?.label ?? modelId ?? "Default model";
+  return models.find((model) => model.id === modelId)?.label ?? modelId ?? t("Default model");
 }
 
 function RuntimeOption({
@@ -279,8 +280,8 @@ function RuntimeSupplierOption({
 function DefaultModelOption({ selected, onSelect }: { selected: boolean; onSelect: () => void }) {
   return (
     <RuntimeOption
-      label="Default model"
-      meta="Use the desktop provider default"
+      label={t("Default model")}
+      meta={t("Use the desktop provider default")}
       selected={selected}
       onPress={onSelect}
     />
@@ -343,7 +344,7 @@ function RuntimeRefreshButton({
       onPress={onPress}
       style={styles.ghostButton}
       accessibilityRole="button"
-      accessibilityLabel="Refresh runtime catalog"
+      accessibilityLabel={t("Refresh runtime catalog")}
     >
       {loading ? (
         <ActivityIndicator size="small" color={theme.colors.foregroundMuted} />
@@ -391,7 +392,7 @@ function RuntimeSections({
   return (
     <>
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Provider</Text>
+        <Text style={styles.sectionTitle}>{t("Provider")}</Text>
         {providers.map((provider) => (
           <RuntimeProviderOption
             key={provider.id}
@@ -403,7 +404,7 @@ function RuntimeSections({
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Supplier</Text>
+        <Text style={styles.sectionTitle}>{t("Supplier")}</Text>
         {suppliers.map((supplier) => (
           <RuntimeSupplierOption
             key={supplier.id}
@@ -415,7 +416,7 @@ function RuntimeSections({
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Model</Text>
+        <Text style={styles.sectionTitle}>{t("Model")}</Text>
         <DefaultModelOption selected={draft?.modelId == null} onSelect={onSelectDefaultModel} />
         {models.map((model) => (
           <RuntimeModelOption
@@ -605,10 +606,14 @@ function useRuntimeSave({
       });
       const resultRoute = result.route;
       if (!resultRoute) {
-        throw new Error("xCodex runtime switch did not return a route");
+        throw new Error(t("xCodex runtime switch did not return a route"));
       }
       setCatalog((current) => applyRuntimeRouteToCatalog(current, resultRoute));
       setVisible(false);
+      toast.show(t("xCodex runtime updated"), {
+        variant: "success",
+        nativeAndroid: true,
+      });
     } catch (saveError) {
       const message = toErrorMessage(saveError);
       setError(message);
@@ -679,8 +684,8 @@ export function XcodexRuntimeSelector({
   const sheetSubtitle = useMemo(
     () => (
       <RuntimeSheetSubtitle
-        providerLabel={selectedProvider?.label ?? "Provider"}
-        supplierLabel={selectedSupplier?.label ?? "Supplier"}
+        providerLabel={selectedProvider?.label ?? t("Provider")}
+        supplierLabel={selectedSupplier?.label ?? t("Supplier")}
         modelLabel={selectedModelLabel}
       />
     ),
@@ -709,7 +714,7 @@ export function XcodexRuntimeSelector({
         onPress={openSheet}
         style={triggerStyle(triggerDisabled)}
         accessibilityRole="button"
-        accessibilityLabel="xCodex runtime"
+        accessibilityLabel={t("xCodex runtime")}
         testID="xcodex-runtime-selector"
       >
         <Cpu size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
@@ -720,7 +725,7 @@ export function XcodexRuntimeSelector({
       </Pressable>
 
       <AdaptiveModalSheet
-        title="xCodex Runtime"
+        title={t("xCodex Runtime")}
         subtitle={sheetSubtitle}
         visible={visible}
         onClose={closeSheet}
@@ -749,7 +754,7 @@ export function XcodexRuntimeSelector({
             {saving ? (
               <ActivityIndicator size="small" color={theme.colors.accentForeground} />
             ) : (
-              <Text style={styles.actionButtonText}>Apply</Text>
+              <Text style={styles.actionButtonText}>{t("Apply")}</Text>
             )}
           </Pressable>
         </View>

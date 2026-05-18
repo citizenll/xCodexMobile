@@ -55,6 +55,7 @@ import { isImeComposingKeyboardEvent } from "@/utils/keyboard-ime";
 import { isWeb } from "@/constants/platform";
 import { useComposerHeightMirror } from "./composer-height-mirror";
 import { computeCanStartDictation } from "./message-input-state";
+import { t } from "@/i18n";
 
 export type ImageAttachment = AttachmentMetadata;
 
@@ -224,7 +225,7 @@ function AttachmentDropdown({
         <TooltipTrigger asChild>
           <DropdownMenuTrigger
             disabled={!isConnected || disabled}
-            accessibilityLabel="Add attachment"
+            accessibilityLabel={t("Add attachment")}
             accessibilityRole="button"
             testID="message-input-attach-button"
             style={attachButtonStyle}
@@ -233,7 +234,7 @@ function AttachmentDropdown({
           </DropdownMenuTrigger>
         </TooltipTrigger>
         <TooltipContent side="top" align="center" offset={8}>
-          <Text style={styles.tooltipText}>Add attachment</Text>
+          <Text style={styles.tooltipText}>{t("Add attachment")}</Text>
         </TooltipContent>
       </Tooltip>
       <DropdownMenuContent
@@ -327,10 +328,10 @@ function resolveSubmitAccessibilityLabel(input: {
   isAgentRunning: boolean;
 }): string {
   if (input.submitButtonAccessibilityLabel) return input.submitButtonAccessibilityLabel;
-  if (input.canPressLoadingButton) return "Interrupt agent";
-  if (input.defaultActionQueues) return "Queue message";
-  if (input.isAgentRunning) return "Send and interrupt";
-  return "Send message";
+  if (input.canPressLoadingButton) return t("Interrupt agent");
+  if (input.defaultActionQueues) return t("Queue message");
+  if (input.isAgentRunning) return t("Send and interrupt");
+  return t("Send message");
 }
 
 function resolveVoiceAccessibilityLabel(input: {
@@ -339,10 +340,10 @@ function resolveVoiceAccessibilityLabel(input: {
   isDictating: boolean;
 }): string {
   if (input.isRealtimeVoiceForCurrentAgent) {
-    return input.isMuted ? "Unmute Voice mode" : "Mute Voice mode";
+    return input.isMuted ? t("Unmute Voice mode") : t("Mute Voice mode");
   }
-  if (input.isDictating) return "Stop dictation";
-  return "Start dictation";
+  if (input.isDictating) return t("Stop dictation");
+  return t("Start dictation");
 }
 
 function resolveVoiceTooltipText(input: {
@@ -350,9 +351,9 @@ function resolveVoiceTooltipText(input: {
   isMuted: boolean;
 }): string {
   if (input.isRealtimeVoiceForCurrentAgent) {
-    return input.isMuted ? "Unmute voice" : "Mute voice";
+    return input.isMuted ? t("Unmute voice") : t("Mute voice");
   }
-  return "Dictation";
+  return t("Dictation");
 }
 
 function resolveSendTooltipLabel(input: {
@@ -360,7 +361,7 @@ function resolveSendTooltipLabel(input: {
   defaultActionQueues: boolean;
 }): string {
   if (input.submitButtonAccessibilityLabel) return input.submitButtonAccessibilityLabel;
-  return input.defaultActionQueues ? "Queue" : "Send";
+  return input.defaultActionQueues ? t("Queue") : t("Send");
 }
 
 interface DesktopKeyPressContext {
@@ -1118,7 +1119,7 @@ function resolveMessageInputProps(props: MessageInputProps): ResolvedMessageInpu
     onAddImages: props.onAddImages,
     client: props.client,
     isReadyForDictation: props.isReadyForDictation,
-    placeholder: props.placeholder ?? "Message...",
+    placeholder: props.placeholder ?? t("Message..."),
     autoFocus: props.autoFocus ?? false,
     autoFocusKey: props.autoFocusKey,
     disabled: props.disabled ?? false,
@@ -1716,7 +1717,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
               onChangeText={handleInputChange}
               placeholder={placeholder}
               uniProps={textInputPlaceholderColorMapping}
-              accessibilityLabel="Message agent..."
+              accessibilityLabel={t("Message agent...")}
               onFocus={handleInputFocus}
               onBlur={handleInputBlur}
               style={textInputStyle}

@@ -41,6 +41,7 @@ import {
 } from "@/utils/project-config-form";
 import { buildProjectsSettingsRoute } from "@/utils/host-routes";
 import type { ProjectHostEntry, ProjectSummary } from "@/utils/projects";
+import { t } from "@/i18n";
 
 const SCRIPT_SERVICE_TYPE = "service";
 
@@ -55,44 +56,50 @@ interface MetadataPromptField {
 
 const METADATA_PROMPT_FIELDS: Record<MetadataPromptKey, MetadataPromptField> = {
   agentTitle: {
-    title: "Agent titles",
-    placeholder: "Keep titles imperative and under 40 characters",
+    title: t("Agent titles"),
+    placeholder: t("Keep titles imperative and under 40 characters"),
     sectionTestID: "metadata-prompt-agent-title-section",
     inputTestID: "metadata-prompt-agent-title-input",
   },
   branchName: {
-    title: "Branch names",
-    placeholder: "Prefix branches with feat/ or fix/, mb/ for personal branches",
+    title: t("Branch names"),
+    placeholder: t("Prefix branches with feat/ or fix/, mb/ for personal branches"),
     sectionTestID: "metadata-prompt-branch-name-section",
     inputTestID: "metadata-prompt-branch-name-input",
   },
   commitMessage: {
-    title: "Commit messages",
-    placeholder: "Use Conventional Commits with a scope",
+    title: t("Commit messages"),
+    placeholder: t("Use Conventional Commits with a scope"),
     sectionTestID: "metadata-prompt-commit-message-section",
     inputTestID: "metadata-prompt-commit-message-input",
   },
   pullRequest: {
-    title: "Pull requests",
-    placeholder: "Lead with a one-paragraph summary, include a Test plan section",
+    title: t("Pull requests"),
+    placeholder: t("Lead with a one-paragraph summary, include a Test plan section"),
     sectionTestID: "metadata-prompt-pull-request-section",
     inputTestID: "metadata-prompt-pull-request-input",
   },
 };
 
-const WORKTREE_GROUP_INFO =
-  "Commands that run when a worktree is created or torn down for this project";
+const WORKTREE_GROUP_INFO = t(
+  "Commands that run when a worktree is created or torn down for this project",
+);
 const WORKTREE_DOCS_URL = "https://paseo.sh/docs/worktrees";
-const WORKTREE_DOCS_TOOLTIP =
-  "See docs for more details and the environment variables available to these commands";
-const SCRIPTS_GROUP_INFO =
-  "Long-running services and one-off commands you can launch from any agent in this project";
-const METADATA_GROUP_INFO =
-  "Project-specific instructions injected into the AI prompts Paseo uses to generate metadata — use them to enforce your team's conventions like branch naming, commit style, or PR format";
+const WORKTREE_DOCS_TOOLTIP = t(
+  "See docs for more details and the environment variables available to these commands",
+);
+const SCRIPTS_GROUP_INFO = t(
+  "Long-running services and one-off commands you can launch from any agent in this project",
+);
+const METADATA_GROUP_INFO = t(
+  "Project-specific instructions injected into the AI prompts Paseo uses to generate metadata — use them to enforce your team's conventions like branch naming, commit style, or PR format",
+);
 
-const NO_TARGET_MESSAGE = "We don't have an editable copy of this project on any connected host.";
+const NO_TARGET_MESSAGE = t(
+  "We don't have an editable copy of this project on any connected host.",
+);
 
-const HOST_SWITCHER_LABEL = "Switch host";
+const HOST_SWITCHER_LABEL = t("Switch host");
 
 type ReadProjectConfigData = Awaited<ReturnType<DaemonClient["readProjectConfig"]>>;
 
@@ -166,7 +173,7 @@ function NoEditableTarget() {
         variant="secondary"
         size="md"
       >
-        Back to projects
+        {t("Back to projects")}
       </Button>
     </View>
   );
@@ -176,14 +183,14 @@ function BackToProjectsButton() {
   return (
     <Button
       testID="project-settings-back-link"
-      accessibilityLabel="Back to projects"
+      accessibilityLabel={t("Back to projects")}
       onPress={navigateBackToProjects}
       variant="ghost"
       size="sm"
       leftIcon={ArrowLeft}
       style={styles.backButton}
     >
-      Back to projects
+      {t("Back to projects")}
     </Button>
   );
 }
@@ -354,7 +361,7 @@ function ReadFailureCallout({ kind, error, onReload, hasMultipleHosts }: ReadFai
     <View style={styles.errorBlock}>
       <Alert testID={testID} variant="error" title={title} description={description}>
         <Button testID={`${testID}-action-0`} onPress={onReload} variant="outline" size="sm">
-          Reload
+          {t("Reload")}
         </Button>
       </Alert>
     </View>
@@ -369,31 +376,31 @@ function resolveReadFailureCopy(input: {
   if (input.kind === "invalid_project_config") {
     return {
       testID: "invalid-callout",
-      title: "paseo.json couldn't be parsed",
-      description: "Fix the file on disk, then reload.",
+      title: t("paseo.json couldn't be parsed"),
+      description: t("Fix the file on disk, then reload."),
     };
   }
   if (input.kind === "project_not_found") {
     return {
       testID: "project-not-found-callout",
-      title: "This host doesn't have this project",
+      title: t("This host doesn't have this project"),
       description: input.hasMultipleHosts
-        ? "Switch to another host above, or reload."
-        : "The selected host has no record of this project.",
+        ? t("Switch to another host above, or reload.")
+        : t("The selected host has no record of this project."),
     };
   }
   if (input.kind === "transport") {
     const detail = errorToDetail(input.error);
     return {
       testID: "read-transport-callout",
-      title: "Couldn't load paseo.json",
-      description: detail ?? "The host didn't respond.",
+      title: t("Couldn't load paseo.json"),
+      description: detail ?? t("The host didn't respond."),
     };
   }
   return {
     testID: "read-failed-callout",
-    title: "Couldn't load paseo.json",
-    description: "Reload to try again.",
+    title: t("Couldn't load paseo.json"),
+    description: t("Reload to try again."),
   };
 }
 
@@ -449,7 +456,7 @@ function ProjectConfigForm({
         });
         setWriteError(null);
         queryClient.invalidateQueries({ queryKey: ["projects"] });
-        toast.show("Project saved", { variant: "success" });
+        toast.show(t("Project saved"), { variant: "success" });
       } else {
         setWriteError(result.error);
       }
@@ -492,10 +499,12 @@ function ProjectConfigForm({
   const handleRemoveScript = useCallback(
     async (script: ProjectScriptDraft) => {
       const ok = await confirmDialog({
-        title: "Remove script?",
-        message: `Remove ${script.name || "this script"}?`,
-        confirmLabel: "Remove",
-        cancelLabel: "Cancel",
+        title: t("Remove script?"),
+        message: script.name
+          ? t("Remove {name}?", { name: script.name })
+          : t("Remove this script?"),
+        confirmLabel: t("Remove"),
+        cancelLabel: t("Cancel"),
         destructive: true,
       });
       if (!ok) return;
@@ -577,7 +586,7 @@ function ProjectConfigForm({
         hitSlop={8}
         style={settingsStyles.sectionHeaderLink}
         accessibilityRole="button"
-        accessibilityLabel="Add script"
+        accessibilityLabel={t("Add script")}
         testID="scripts-add-button"
       >
         <Plus size={ICON_SIZE} color={styles.iconColor.color} />
@@ -590,7 +599,7 @@ function ProjectConfigForm({
     () => (
       <ExternalLink
         href={WORKTREE_DOCS_URL}
-        label="Docs"
+        label={t("Docs")}
         tooltip={WORKTREE_DOCS_TOOLTIP}
         testID="worktree-setup-docs-link"
       />
@@ -601,7 +610,7 @@ function ProjectConfigForm({
     () => (
       <ExternalLink
         href={WORKTREE_DOCS_URL}
-        label="Docs"
+        label={t("Docs")}
         tooltip={WORKTREE_DOCS_TOOLTIP}
         testID="worktree-teardown-docs-link"
       />
@@ -616,15 +625,19 @@ function ProjectConfigForm({
   return (
     <View>
       <SettingsGroup
-        title="Worktree lifecycle hooks"
+        title={t("Worktree lifecycle hooks")}
         info={WORKTREE_GROUP_INFO}
         testID="worktree-group"
       >
-        <SettingsSection title="Setup" testID="worktree-setup-section" trailing={setupDocsLink}>
+        <SettingsSection
+          title={t("Setup")}
+          testID="worktree-setup-section"
+          trailing={setupDocsLink}
+        >
           <View style={settingsStyles.card}>
             <TextInput
               testID="worktree-setup-input"
-              accessibilityLabel="Worktree setup commands"
+              accessibilityLabel={t("Worktree setup commands")}
               multiline
               value={draft.setupText}
               onChangeText={handleSetupChange}
@@ -636,7 +649,7 @@ function ProjectConfigForm({
         </SettingsSection>
 
         <SettingsSection
-          title="Teardown"
+          title={t("Teardown")}
           testID="worktree-teardown-section"
           trailing={teardownDocsLink}
           flush
@@ -644,7 +657,7 @@ function ProjectConfigForm({
           <View style={settingsStyles.card}>
             <TextInput
               testID="worktree-teardown-input"
-              accessibilityLabel="Worktree teardown commands"
+              accessibilityLabel={t("Worktree teardown commands")}
               multiline
               value={draft.teardownText}
               onChangeText={handleTeardownChange}
@@ -657,7 +670,7 @@ function ProjectConfigForm({
       </SettingsGroup>
 
       <SettingsGroup
-        title="Scripts"
+        title={t("Scripts")}
         info={SCRIPTS_GROUP_INFO}
         trailing={scriptsTrailing}
         testID="scripts-group"
@@ -665,7 +678,7 @@ function ProjectConfigForm({
         <View style={settingsStyles.card} testID="scripts-list">
           {draft.scripts.length === 0 ? (
             <View style={settingsStyles.row}>
-              <Text style={styles.emptyScripts}>No scripts yet.</Text>
+              <Text style={styles.emptyScripts}>{t("No scripts yet.")}</Text>
             </View>
           ) : (
             draft.scripts.map((script, index) => (
@@ -681,7 +694,11 @@ function ProjectConfigForm({
         </View>
       </SettingsGroup>
 
-      <SettingsGroup title="Metadata generation" info={METADATA_GROUP_INFO} testID="metadata-group">
+      <SettingsGroup
+        title={t("Metadata generation")}
+        info={METADATA_GROUP_INFO}
+        testID="metadata-group"
+      >
         {METADATA_PROMPT_KEYS.map((key, index) => (
           <MetadataPromptSection
             key={key}
@@ -698,8 +715,8 @@ function ProjectConfigForm({
           <Alert
             testID="stale-callout"
             variant="error"
-            title="Config changed on disk"
-            description="Reload to fetch the latest paseo.json before saving."
+            title={t("Config changed on disk")}
+            description={t("Reload to fetch the latest paseo.json before saving.")}
           >
             <Button
               testID="stale-callout-action-0"
@@ -707,7 +724,7 @@ function ProjectConfigForm({
               variant="outline"
               size="sm"
             >
-              Reload
+              {t("Reload")}
             </Button>
           </Alert>
         </View>
@@ -718,8 +735,8 @@ function ProjectConfigForm({
           <Alert
             testID="write-failed-callout"
             variant="error"
-            title="Couldn't save paseo.json"
-            description="Try again, or reload the latest version from disk."
+            title={t("Couldn't save paseo.json")}
+            description={t("Try again, or reload the latest version from disk.")}
           >
             <Button
               testID="write-failed-callout-action-0"
@@ -727,7 +744,7 @@ function ProjectConfigForm({
               variant="outline"
               size="sm"
             >
-              Try again
+              {t("Try again")}
             </Button>
             <Button
               testID="write-failed-callout-action-1"
@@ -735,7 +752,7 @@ function ProjectConfigForm({
               variant="outline"
               size="sm"
             >
-              Reload
+              {t("Reload")}
             </Button>
           </Alert>
         </View>
@@ -744,14 +761,14 @@ function ProjectConfigForm({
       <View style={styles.footer}>
         <Button
           testID="save-button"
-          accessibilityLabel="Save project config"
+          accessibilityLabel={t("Save project config")}
           variant="default"
           size="md"
           disabled={saveDisabled}
           loading={saveMutation.isPending}
           onPress={handleSave}
         >
-          {saveMutation.isPending ? "Saving…" : "Save"}
+          {saveMutation.isPending ? t("Saving…") : t("Save")}
         </Button>
       </View>
 
@@ -787,10 +804,10 @@ function ProjectNameEditor({ project, client }: ProjectNameEditorProps) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
       setIsEditing(false);
-      toast.show("Project renamed", { variant: "success" });
+      toast.show(t("Project renamed"), { variant: "success" });
     },
     onError: (error) => {
-      const message = error instanceof Error ? error.message : "Couldn't rename project";
+      const message = error instanceof Error ? error.message : t("Couldn't rename project");
       toast.show(message, { variant: "error" });
     },
   });
@@ -827,7 +844,7 @@ function ProjectNameEditor({ project, client }: ProjectNameEditorProps) {
         </Text>
         <Pressable
           testID="project-name-edit-button"
-          accessibilityLabel="Rename project"
+          accessibilityLabel={t("Rename project")}
           onPress={handleStartEdit}
           hitSlop={8}
           style={styles.nameEditorIconButton}
@@ -837,13 +854,13 @@ function ProjectNameEditor({ project, client }: ProjectNameEditorProps) {
         {project.projectCustomName ? (
           <Pressable
             testID="project-name-reset-button"
-            accessibilityLabel="Reset project name to default"
+            accessibilityLabel={t("Reset project name to default")}
             onPress={handleReset}
             disabled={renameMutation.isPending}
             hitSlop={8}
             style={styles.nameEditorResetButton}
           >
-            <Text style={styles.nameEditorResetText}>Reset</Text>
+            <Text style={styles.nameEditorResetText}>{t("Reset")}</Text>
           </Pressable>
         ) : null}
       </View>
@@ -854,7 +871,7 @@ function ProjectNameEditor({ project, client }: ProjectNameEditorProps) {
     <View style={styles.nameEditorRow}>
       <TextInput
         testID="project-name-input"
-        accessibilityLabel="Project name"
+        accessibilityLabel={t("Project name")}
         value={value}
         onChangeText={setValue}
         placeholder={project.projectName}
@@ -867,7 +884,7 @@ function ProjectNameEditor({ project, client }: ProjectNameEditorProps) {
       />
       <Pressable
         testID="project-name-save-button"
-        accessibilityLabel="Save project name"
+        accessibilityLabel={t("Save project name")}
         onPress={handleSave}
         disabled={renameMutation.isPending}
         hitSlop={8}
@@ -877,7 +894,7 @@ function ProjectNameEditor({ project, client }: ProjectNameEditorProps) {
       </Pressable>
       <Pressable
         testID="project-name-cancel-button"
-        accessibilityLabel="Cancel renaming"
+        accessibilityLabel={t("Cancel renaming")}
         onPress={handleCancel}
         disabled={renameMutation.isPending}
         hitSlop={8}
@@ -1040,7 +1057,7 @@ function ScriptRow({ script, isFirst, onEdit, onRemove }: ScriptRowProps) {
     <View style={rowStyle} testID={`script-row-${script.id}`}>
       <Pressable style={styles.scriptRowMain} onPress={handleEdit}>
         <Text style={settingsStyles.rowTitle} numberOfLines={1}>
-          {script.name || "Untitled script"}
+          {script.name || t("Untitled script")}
         </Text>
         <Text style={settingsStyles.rowHint} numberOfLines={1}>
           {scriptHint(script)}
@@ -1048,7 +1065,7 @@ function ScriptRow({ script, isFirst, onEdit, onRemove }: ScriptRowProps) {
       </Pressable>
       <DropdownMenu>
         <DropdownMenuTrigger
-          accessibilityLabel="Open script menu"
+          accessibilityLabel={t("Open script menu")}
           testID={`script-row-menu-${script.id}`}
           style={styles.scriptKebab}
         >
@@ -1056,14 +1073,14 @@ function ScriptRow({ script, isFirst, onEdit, onRemove }: ScriptRowProps) {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" minWidth={160}>
           <DropdownMenuItem testID={`script-action-${script.id}-edit`} onSelect={handleEdit}>
-            Edit
+            {t("Edit")}
           </DropdownMenuItem>
           <DropdownMenuItem
             testID={`script-action-${script.id}-remove`}
             destructive
             onSelect={handleRemove}
           >
-            Remove
+            {t("Remove")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -1074,7 +1091,7 @@ function ScriptRow({ script, isFirst, onEdit, onRemove }: ScriptRowProps) {
 function scriptHint(script: ProjectScriptDraft): string {
   const pieces: string[] = [];
   if (script.type) pieces.push(script.type);
-  if (script.portText) pieces.push(`port ${script.portText}`);
+  if (script.portText) pieces.push(t("port {port}", { port: script.portText }));
   if (script.commandText) pieces.push(script.commandText.split("\n")[0] ?? "");
   return pieces.join(" · ");
 }
@@ -1086,8 +1103,8 @@ interface ScriptValidation {
 }
 
 function validateScript(script: ProjectScriptDraft): ScriptValidation {
-  const nameError = script.name.trim().length === 0 ? "Name is required" : null;
-  const commandError = script.commandText.trim().length === 0 ? "Command is required" : null;
+  const nameError = script.name.trim().length === 0 ? t("Name is required") : null;
+  const commandError = script.commandText.trim().length === 0 ? t("Command is required") : null;
   return {
     hasErrors: Boolean(nameError || commandError),
     nameError,
@@ -1154,16 +1171,16 @@ function ScriptEditModal({ script, onChange, onCancel, onSave }: ScriptEditModal
   return (
     <AdaptiveModalSheet
       visible
-      title={script.name ? `Edit ${script.name}` : "New script"}
+      title={script.name ? t("Edit {name}", { name: script.name }) : t("New script")}
       onClose={onCancel}
       testID="script-edit-modal"
       desktopMaxWidth={560}
     >
       <View style={styles.modalSection}>
-        <Text style={styles.modalLabel}>Name</Text>
+        <Text style={styles.modalLabel}>{t("Name")}</Text>
         <TextInput
           testID="script-edit-name"
-          accessibilityLabel="Script name"
+          accessibilityLabel={t("Script name")}
           value={script.name}
           onChangeText={handleNameChange}
           onBlur={handleNameBlur}
@@ -1178,10 +1195,10 @@ function ScriptEditModal({ script, onChange, onCancel, onSave }: ScriptEditModal
         ) : null}
       </View>
       <View style={styles.modalSection}>
-        <Text style={styles.modalLabel}>Command</Text>
+        <Text style={styles.modalLabel}>{t("Command")}</Text>
         <TextInput
           testID="script-edit-command"
-          accessibilityLabel="Script command"
+          accessibilityLabel={t("Script command")}
           multiline
           value={script.commandText}
           onChangeText={handleCommandChange}
@@ -1199,25 +1216,25 @@ function ScriptEditModal({ script, onChange, onCancel, onSave }: ScriptEditModal
       <View style={styles.modalSection}>
         <View style={styles.serviceToggleRow}>
           <View style={styles.serviceToggleText}>
-            <Text style={styles.serviceToggleLabel}>Run as a service</Text>
+            <Text style={styles.serviceToggleLabel}>{t("Run as a service")}</Text>
             <Text style={styles.modalHint}>
-              Paseo supervises the process and assigns a port via $PASEO_PORT
+              {t("Paseo supervises the process and assigns a port via $PASEO_PORT")}
             </Text>
           </View>
           <Switch
             value={isService}
             onValueChange={handleServiceToggle}
-            accessibilityLabel="Run as a service"
+            accessibilityLabel={t("Run as a service")}
             testID="script-edit-service-toggle"
           />
         </View>
       </View>
       <View style={styles.modalFooter}>
         <Button onPress={onCancel} variant="ghost" size="md" testID="script-edit-cancel">
-          Cancel
+          {t("Cancel")}
         </Button>
         <Button onPress={handleSavePress} variant="default" size="md" testID="script-edit-save">
-          Save
+          {t("Save")}
         </Button>
       </View>
     </AdaptiveModalSheet>

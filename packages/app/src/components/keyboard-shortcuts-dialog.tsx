@@ -7,6 +7,7 @@ import { Shortcut } from "@/components/ui/shortcut";
 import { useKeyboardShortcutsStore } from "@/stores/keyboard-shortcuts-store";
 import { getShortcutOs } from "@/utils/shortcut-platform";
 import { buildKeyboardShortcutHelpSections } from "@/keyboard/keyboard-shortcuts";
+import { t, translateText } from "@/i18n";
 
 const SNAP_POINTS: string[] = ["70%", "92%"];
 
@@ -25,7 +26,7 @@ export function KeyboardShortcutsDialog() {
 
   return (
     <AdaptiveModalSheet
-      title="Shortcuts"
+      title={t("Shortcuts")}
       visible={open}
       onClose={handleClose}
       testID="keyboard-shortcuts-dialog"
@@ -34,13 +35,15 @@ export function KeyboardShortcutsDialog() {
       <View testID="keyboard-shortcuts-dialog-content" style={styles.content}>
         {sections.map((section) => (
           <View key={section.title} style={styles.section}>
-            <Text style={styles.sectionTitle}>{section.title}</Text>
+            <Text style={styles.sectionTitle}>{translateText(section.title)}</Text>
             <View style={styles.rows}>
               {section.rows.map((row) => (
                 <View key={row.id} style={styles.row}>
                   <View style={styles.rowText}>
-                    <Text style={styles.rowLabel}>{row.label}</Text>
-                    {row.note ? <Text style={styles.rowNote}>{row.note}</Text> : null}
+                    <Text style={styles.rowLabel}>{translateText(row.label)}</Text>
+                    {row.note ? (
+                      <Text style={styles.rowNote}>{translateText(row.note)}</Text>
+                    ) : null}
                   </View>
                   <Shortcut keys={row.keys} style={styles.rowShortcut} />
                 </View>

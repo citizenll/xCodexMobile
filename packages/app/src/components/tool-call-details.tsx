@@ -16,6 +16,7 @@ import { useWebScrollbarStyle } from "@/hooks/use-web-scrollbar-style";
 import { DiffViewer } from "./diff-viewer";
 import { getCodeInsets } from "./code-insets";
 import { isWeb } from "@/constants/platform";
+import { t } from "@/i18n";
 
 const ScrollView = isWeb ? RNScrollView : GHScrollView;
 
@@ -54,8 +55,14 @@ function resolveShouldFill(
   fillAvailableHeight: boolean,
 ): boolean {
   if (!fillAvailableHeight) return false;
-  const t = detail?.type;
-  return t === "shell" || t === "edit" || t === "write" || t === "read" || t === "sub_agent";
+  const detailType = detail?.type;
+  return (
+    detailType === "shell" ||
+    detailType === "edit" ||
+    detailType === "write" ||
+    detailType === "read" ||
+    detailType === "sub_agent"
+  );
 }
 
 function useDetailStyles(
@@ -696,7 +703,7 @@ function buildDetailSections(
 function ErrorSection({ errorText, ds }: { errorText: string; ds: DetailStyles }) {
   return (
     <View style={styles.section}>
-      <Text style={SECTION_TITLE_ERROR_STYLE}>Error</Text>
+      <Text style={SECTION_TITLE_ERROR_STYLE}>{t("Error")}</Text>
       <ScrollView
         horizontal
         nestedScrollEnabled
@@ -743,7 +750,7 @@ export function ToolCallDetailsContent({
     if (showLoadingSkeleton) {
       return <LoadingSkeleton containerStyle={ds.loadingContainerStyle} />;
     }
-    return <Text style={styles.emptyStateText}>No additional details available</Text>;
+    return <Text style={styles.emptyStateText}>{t("No additional details available")}</Text>;
   }
 
   return <View style={ds.fullBleedContainerStyle}>{sections}</View>;

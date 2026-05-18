@@ -96,6 +96,7 @@ import { useAttachmentPreviewUrl } from "@/attachments/use-attachment-preview-ur
 import { persistAttachmentFromBytes, persistAttachmentFromDataUrl } from "@/attachments/service";
 import type { DaemonClient } from "@server/client/daemon-client";
 import { isWeb, isNative } from "@/constants/platform";
+import { t } from "@/i18n";
 export type { InlinePathTarget } from "@/utils/inline-path";
 
 type MarkdownStyles = Record<string, TextStyle & ViewStyle & { [key: string]: unknown }>;
@@ -546,7 +547,7 @@ export const UserMessage = memo(function UserMessage({
             <TurnCopyButton
               getContent={getMessageContent}
               containerStyle={userMessageStylesheet.copyButton}
-              accessibilityLabel="Copy message"
+              accessibilityLabel={t("Copy message")}
             />
           </View>
         ) : null}
@@ -656,7 +657,12 @@ export const AssistantTurnFooter = memo(function AssistantTurnFooter({
           onHoverOut={handleHoverOut}
           accessibilityRole={canSwap ? "button" : undefined}
           accessibilityLabel={
-            canSwap ? `${durationLabel}, started ${timestampLabel}` : durationLabel
+            canSwap
+              ? t("{duration}, started {timestamp}", {
+                  duration: durationLabel,
+                  timestamp: timestampLabel,
+                })
+              : durationLabel
           }
         >
           <View style={assistantTurnFooterStylesheet.labelWrapper}>
@@ -864,7 +870,7 @@ const AssistantMarkdownResolvedImage = memo(function AssistantMarkdownResolvedIm
         <View style={stateSurfaceStyle}>
           {loadState.status === "loading" ? <ActivityIndicator size="small" /> : null}
           {loadState.status === "error" ? (
-            <Text style={assistantMessageStylesheet.imageErrorText}>Image unavailable</Text>
+            <Text style={assistantMessageStylesheet.imageErrorText}>{t("Image unavailable")}</Text>
           ) : null}
         </View>
       </View>
@@ -930,7 +936,7 @@ function AssistantMarkdownImage({
 
       const file = await client.readFile(resolution.cwd, resolution.path);
       if (file.kind !== "image") {
-        throw new Error("Image preview unavailable.");
+        throw new Error(t("Image preview unavailable."));
       }
 
       return await persistAttachmentFromBytes({
@@ -1015,7 +1021,7 @@ function AssistantMarkdownImage({
 function resolveAssistantImageErrorText(fileError: unknown, dataError: unknown): string {
   if (fileError instanceof Error) return fileError.message;
   if (dataError instanceof Error) return dataError.message;
-  return "Unable to load image preview.";
+  return t("Unable to load image preview.");
 }
 
 interface InlinePathChipProps {
@@ -1250,7 +1256,7 @@ export const TurnCopyButton = memo(function TurnCopyButton({
       style={pressableStyle}
       accessibilityRole="button"
       accessibilityLabel={
-        copied ? (copiedAccessibilityLabel ?? "Copied") : (accessibilityLabel ?? "Copy turn")
+        copied ? (copiedAccessibilityLabel ?? t("Copied")) : (accessibilityLabel ?? t("Copy turn"))
       }
     >
       {({ hovered }) => {
@@ -2056,7 +2062,7 @@ export const SpeakMessage = memo(function SpeakMessage({
     <View testID="speak-message" style={containerStyle}>
       <View style={speakMessageStylesheet.header}>
         <ThemedMicVocal size={12} uniProps={foregroundMutedColorMapping} />
-        <Text style={speakMessageStylesheet.headerLabel}>Spoke</Text>
+        <Text style={speakMessageStylesheet.headerLabel}>{t("Spoke")}</Text>
       </View>
       <Text style={speakMessageStylesheet.text}>{message}</Text>
     </View>
@@ -2226,7 +2232,7 @@ export const ActivityLog = memo(function ActivityLog({
             </Text>
             {metadata && (
               <View style={activityLogStylesheet.detailsRow}>
-                <Text style={activityLogStylesheet.detailsText}>Details</Text>
+                <Text style={activityLogStylesheet.detailsText}>{t("Details")}</Text>
                 {isExpanded ? (
                   <ChevronDown size={12} color="#71717a" />
                 ) : (
@@ -2396,7 +2402,7 @@ export const TodoListCard = memo(function TodoListCard({
       <View style={todoListCardStylesheet.detailsWrapper}>
         <View style={todoListCardStylesheet.list}>
           {items.length === 0 ? (
-            <Text style={todoListCardStylesheet.emptyText}>No tasks yet.</Text>
+            <Text style={todoListCardStylesheet.emptyText}>{t("No tasks yet.")}</Text>
           ) : (
             items.map((item) => (
               <TodoListItemRow key={item.text} text={item.text} completed={item.completed} />
@@ -2409,7 +2415,7 @@ export const TodoListCard = memo(function TodoListCard({
 
   return (
     <ExpandableBadge
-      label="Tasks"
+      label={t("Tasks")}
       secondaryLabel={nextTask}
       icon={CheckSquare}
       isExpanded={isExpanded}
@@ -2576,7 +2582,7 @@ function ExpandableBadgeLabelRow({
           onHoverIn={onOpenFileHoverIn}
           onHoverOut={onOpenFileHoverOut}
           accessibilityRole="button"
-          accessibilityLabel="Open file"
+          accessibilityLabel={t("Open file")}
           testID="tool-call-open-file"
           style={expandableBadgeStylesheet.openFileButton}
           hitSlop={6}
@@ -3246,7 +3252,7 @@ export const ToolCall = memo(function ToolCall({
   if (presentation.isPlan && effectiveDetail?.type === "plan") {
     return (
       <PlanCard
-        title="Plan"
+        title={t("Plan")}
         text={effectiveDetail.text}
         testID="timeline-plan-card"
         disableOuterSpacing={disableOuterSpacing}

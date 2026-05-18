@@ -20,6 +20,7 @@ import { requireWorkspaceExecutionAuthority } from "@/utils/workspace-execution"
 import { navigateToAgent } from "@/utils/navigate-to-agent";
 import { navigateToPreparedWorkspaceTab } from "@/utils/workspace-navigation";
 import type { ImageAttachment, MessagePayload } from "./message-input";
+import { t } from "@/i18n";
 
 function toProjectIconDataUri(icon: { mimeType: string; data: string } | null): string | null {
   if (!icon) {
@@ -380,7 +381,7 @@ export function WorkspaceSetupDialog() {
 
   return (
     <AdaptiveModalSheet
-      title="Create workspace"
+      title={t("Create workspace")}
       subtitle={subtitleContent}
       visible={true}
       onClose={handleClose}

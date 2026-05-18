@@ -21,6 +21,7 @@ import { getDesktopDaemonLogs, type DesktopDaemonLogs } from "@/desktop/daemon/d
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { isNative, isWeb } from "@/constants/platform";
 import { useWebScrollbarStyle } from "@/hooks/use-web-scrollbar-style";
+import { t } from "@/i18n";
 
 interface StartupSplashScreenProps {
   bootstrapState?: {
@@ -348,7 +349,7 @@ export function StartupSplashScreen({ bootstrapState }: StartupSplashScreenProps
         }
         const message = error instanceof Error ? error.message : String(error);
         setDaemonLogs(null);
-        setLogsError(`Unable to load daemon logs: ${message}`);
+        setLogsError(t("Unable to load daemon logs: {message}", { message }));
       })
       .finally(() => {
         if (!isCancelled) {
@@ -363,7 +364,7 @@ export function StartupSplashScreen({ bootstrapState }: StartupSplashScreenProps
 
   const logsText = useMemo(() => {
     if (isLoadingLogs) {
-      return "Loading daemon logs...";
+      return t("Loading daemon logs...");
     }
     if (daemonLogs?.contents) {
       return daemonLogs.contents;
@@ -371,7 +372,7 @@ export function StartupSplashScreen({ bootstrapState }: StartupSplashScreenProps
     if (logsError) {
       return logsError;
     }
-    return "No daemon logs available.";
+    return t("No daemon logs available.");
   }, [daemonLogs?.contents, isLoadingLogs, logsError]);
 
   const handleCopyLogs = useCallback(() => {
@@ -418,12 +419,13 @@ export function StartupSplashScreen({ bootstrapState }: StartupSplashScreenProps
         <View style={styles.errorContent}>
           <View style={styles.errorHeader}>
             <PaseoLogo size={64} />
-            <Text style={styles.title}>Something went wrong</Text>
+            <Text style={styles.title}>{t("Something went wrong")}</Text>
           </View>
 
           <Text style={styles.errorDescription}>
-            The local server failed to start. If this keeps happening, please report the issue on
-            GitHub and include the logs below.
+            {t(
+              "The local server failed to start. If this keeps happening, please report the issue on GitHub and include the logs below.",
+            )}
           </Text>
 
           <Text style={styles.errorMessage}>{bootstrapState.splashError}</Text>
@@ -444,16 +446,16 @@ export function StartupSplashScreen({ bootstrapState }: StartupSplashScreenProps
 
           <View style={styles.actionRow}>
             <Button variant="secondary" leftIcon={copyIcon} onPress={handleCopyLogs}>
-              Copy logs
+              {t("Copy logs")}
             </Button>
             <Button variant="outline" leftIcon={warningIcon} onPress={openGithubIssue}>
-              Open GitHub issue
+              {t("Open GitHub issue")}
             </Button>
             <Button variant="outline" leftIcon={bookIcon} onPress={openDocs}>
-              Docs
+              {t("Docs")}
             </Button>
             <Button variant="default" leftIcon={retryIcon} onPress={bootstrapState.retry}>
-              Retry
+              {t("Retry")}
             </Button>
           </View>
         </View>

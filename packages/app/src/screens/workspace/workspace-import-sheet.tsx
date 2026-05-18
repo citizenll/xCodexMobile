@@ -11,6 +11,7 @@ import { SegmentedControl, type SegmentedControlOption } from "@/components/ui/s
 import { getProviderIcon } from "@/components/provider-icons";
 import { formatTimeAgo } from "@/utils/time";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
+import { t } from "@/i18n";
 
 const IMPORTABLE_PROVIDER_IDS: Set<string> = new Set(IMPORTABLE_PROVIDERS);
 const PER_PROVIDER_LIMIT = 15;
@@ -188,38 +189,40 @@ function SheetStatusMessages({
 }: SheetStatusMessagesProps) {
   const { theme } = useUnistyles();
   if (!isClientReady) {
-    return <Text style={styles.statusText}>Connect to a workspace to import sessions</Text>;
+    return <Text style={styles.statusText}>{t("Connect to a workspace to import sessions")}</Text>;
   }
   if (isSnapshotUnsupported) {
-    return <Text style={styles.statusText}>Update the host to import sessions.</Text>;
+    return <Text style={styles.statusText}>{t("Update the host to import sessions.")}</Text>;
   }
   return (
     <>
       {hasNoImportableProviders ? (
-        <Text style={styles.statusText}>No importable providers are enabled.</Text>
+        <Text style={styles.statusText}>{t("No importable providers are enabled.")}</Text>
       ) : null}
       {isLoadingSessions ? (
         <View style={styles.statusRow}>
           <LoadingSpinner color={theme.colors.foregroundMuted} />
-          <Text style={styles.statusText}>Loading recent sessions...</Text>
+          <Text style={styles.statusText}>{t("Loading recent sessions...")}</Text>
         </View>
       ) : null}
       {allQueriesErrored ? (
-        <Text style={styles.statusText}>Could not load recent sessions.</Text>
+        <Text style={styles.statusText}>{t("Could not load recent sessions.")}</Text>
       ) : null}
       {!allQueriesErrored && erroredProviderLabels.length > 0 ? (
         <Text style={styles.statusText}>
-          Could not load sessions for {erroredProviderLabels.join(", ")}.
+          {t("Could not load sessions for {providers}.", {
+            providers: erroredProviderLabels.join(", "),
+          })}
         </Text>
       ) : null}
       {importErrored ? (
-        <Text style={styles.statusText}>Could not import selected session.</Text>
+        <Text style={styles.statusText}>{t("Could not import selected session.")}</Text>
       ) : null}
       {showEmptyState ? (
         <Text style={styles.statusText}>
           {allAlreadyImported
-            ? "All recent sessions are already imported."
-            : "No recent sessions to import."}
+            ? t("All recent sessions are already imported.")
+            : t("No recent sessions to import.")}
         </Text>
       ) : null}
     </>
@@ -231,7 +234,7 @@ function buildProviderFilterOptions(
   providerLabelById: ReadonlyMap<string, string>,
 ): SegmentedControlOption<string>[] {
   const options: SegmentedControlOption<string>[] = [
-    { value: ALL_FILTER_VALUE, label: "All", testID: "workspace-import-filter-all" },
+    { value: ALL_FILTER_VALUE, label: t("All"), testID: "workspace-import-filter-all" },
   ];
   for (const provider of providers) {
     const ProviderIcon = getProviderIcon(provider);
@@ -294,7 +297,7 @@ function WorkspaceImportSheetRow({
           <Text style={styles.rowTitle} numberOfLines={1}>
             {title}
           </Text>
-          <Text style={styles.rowMeta}>{importing ? "Importing..." : lastActivity}</Text>
+          <Text style={styles.rowMeta}>{importing ? t("Importing...") : lastActivity}</Text>
         </View>
         <Text style={styles.rowPreview} numberOfLines={2}>
           {promptPreview}
@@ -379,7 +382,7 @@ export function WorkspaceImportSheet({
   const importMutation = useMutation({
     mutationFn: async (entry: FetchRecentProviderSessionEntry) => {
       if (!client || !workspaceDirectory) {
-        throw new Error("Host is not connected");
+        throw new Error(t("Host is not connected"));
       }
       const agent = await client.importAgent({
         providerId: entry.providerId,
@@ -435,7 +438,7 @@ export function WorkspaceImportSheet({
     <AdaptiveModalSheet
       visible={visible}
       onClose={onClose}
-      title="Import session"
+      title={t("Import session")}
       testID="workspace-import-sheet"
       desktopMaxWidth={560}
       snapPoints={IMPORT_SHEET_SNAP_POINTS}

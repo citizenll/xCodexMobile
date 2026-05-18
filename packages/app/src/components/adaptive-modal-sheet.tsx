@@ -20,6 +20,7 @@ import {
   useIsolatedBottomSheetVisibility,
 } from "@/components/ui/isolated-bottom-sheet-modal";
 import { isNative, isWeb } from "@/constants/platform";
+import { t } from "@/i18n";
 
 type EscHandler = () => void;
 const escStack: EscHandler[] = [];
@@ -246,7 +247,7 @@ export function AdaptiveModalSheet({
             {subtitle}
           </View>
           {headerActions ? <View style={styles.headerActions}>{headerActions}</View> : null}
-          <Pressable accessibilityLabel="Close" style={styles.closeButton} onPress={onClose}>
+          <Pressable accessibilityLabel={t("Close")} style={styles.closeButton} onPress={onClose}>
             <X size={16} color={theme.colors.foregroundMuted} />
           </Pressable>
         </View>
@@ -275,7 +276,7 @@ export function AdaptiveModalSheet({
           {subtitle}
         </View>
         {headerActions ? <View style={styles.headerActions}>{headerActions}</View> : null}
-        <Pressable accessibilityLabel="Close" style={styles.closeButton} onPress={onClose}>
+        <Pressable accessibilityLabel={t("Close")} style={styles.closeButton} onPress={onClose}>
           <X size={16} color={theme.colors.foregroundMuted} />
         </Pressable>
       </View>
@@ -296,7 +297,7 @@ export function AdaptiveModalSheet({
 
   const desktopContent = (
     <View style={styles.desktopOverlay} testID={testID}>
-      <Pressable accessibilityLabel="Dismiss" style={ABSOLUTE_FILL_STYLE} onPress={onClose} />
+      <Pressable accessibilityLabel={t("Dismiss")} style={ABSOLUTE_FILL_STYLE} onPress={onClose} />
       <View style={desktopCardStyle}>
         {onFilesDropped ? (
           <FileDropZone onFilesDropped={onFilesDropped}>{cardInner}</FileDropZone>

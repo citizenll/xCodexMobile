@@ -2,6 +2,7 @@ import { Pressable, Text, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { t } from "@/i18n";
 
 interface ContextWindowMeterProps {
   maxTokens: number;
@@ -76,7 +77,9 @@ export function ContextWindowMeter({ maxTokens, usedTokens }: ContextWindowMeter
         <Pressable
           style={styles.container}
           accessibilityRole="image"
-          accessibilityLabel={`Context window ${roundedPercentage}% used`}
+          accessibilityLabel={t("Context window {percentage}% used", {
+            percentage: roundedPercentage,
+          })}
         >
           <Svg
             width={SVG_SIZE}
@@ -110,11 +113,16 @@ export function ContextWindowMeter({ maxTokens, usedTokens }: ContextWindowMeter
       </TooltipTrigger>
       <TooltipContent side="top" align="center" offset={8}>
         <View style={styles.tooltipContent}>
-          <Text style={styles.tooltipTitle}>Context window</Text>
-          <Text style={styles.tooltipText}>{`${roundedPercentage}% used`}</Text>
-          <Text
-            style={styles.tooltipDetail}
-          >{`${formatTokenCount(usedTokens)} / ${formatTokenCount(maxTokens)} tokens`}</Text>
+          <Text style={styles.tooltipTitle}>{t("Context window")}</Text>
+          <Text style={styles.tooltipText}>
+            {t("{percentage}% used", { percentage: roundedPercentage })}
+          </Text>
+          <Text style={styles.tooltipDetail}>
+            {t("{used} / {max} tokens", {
+              used: formatTokenCount(usedTokens),
+              max: formatTokenCount(maxTokens),
+            })}
+          </Text>
         </View>
       </TooltipContent>
     </Tooltip>

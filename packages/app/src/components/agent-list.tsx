@@ -21,6 +21,7 @@ import { getProviderIcon } from "@/components/provider-icons";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
 import type { Agent } from "@/stores/session-store";
 import { useArchiveAgent } from "@/hooks/use-archive-agent";
+import { t } from "@/i18n";
 
 interface AgentListProps {
   agents: AggregatedAgent[];
@@ -105,35 +106,35 @@ function deriveDateSectionLabel(lastActivityAt: Date): string {
   );
 
   if (activityStart.getTime() >= todayStart.getTime()) {
-    return "Today";
+    return t("Today");
   }
   if (activityStart.getTime() >= yesterdayStart.getTime()) {
-    return "Yesterday";
+    return t("Yesterday");
   }
 
   const diffTime = todayStart.getTime() - activityStart.getTime();
   const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
   if (diffDays <= 7) {
-    return "This week";
+    return t("This week");
   }
   if (diffDays <= 30) {
-    return "This month";
+    return t("This month");
   }
-  return "Older";
+  return t("Older");
 }
 
 function formatStatusLabel(status: AggregatedAgent["status"]): string {
   switch (status) {
     case "initializing":
-      return "Starting";
+      return t("Starting");
     case "idle":
-      return "Idle";
+      return t("Idle");
     case "running":
-      return "Running";
+      return t("Running");
     case "error":
-      return "Error";
+      return t("Error");
     case "closed":
-      return "Closed";
+      return t("Closed");
     default:
       return status;
   }
@@ -231,14 +232,17 @@ function SessionRow({
             <ProviderIcon size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
           </View>
           <Text style={sessionTitleStyle} numberOfLines={1}>
-            {agent.title || "New session"}
+            {agent.title || t("New session")}
           </Text>
-          {agent.archivedAt ? <SessionBadge label="Archived" icon={archivedIcon} /> : null}
+          {agent.archivedAt ? <SessionBadge label={t("Archived")} icon={archivedIcon} /> : null}
           {(agent.pendingPermissionCount ?? 0) > 0 ? (
-            <SessionBadge label={`${agent.pendingPermissionCount} pending`} tone="warning" />
+            <SessionBadge
+              label={t("{count} pending", { count: agent.pendingPermissionCount ?? 0 })}
+              tone="warning"
+            />
           ) : null}
           {!isMobile && showAttentionIndicator && agent.requiresAttention ? (
-            <SessionBadge label="Attention" tone="danger" />
+            <SessionBadge label={t("Attention")} tone="danger" />
           ) : null}
         </View>
         {isMobile && (
@@ -272,7 +276,7 @@ function SessionRow({
       )}
       {isMobile && showAttentionIndicator && agent.requiresAttention ? (
         <View style={styles.rowTrailing}>
-          <SessionBadge label="Attention" tone="danger" />
+          <SessionBadge label={t("Attention")} tone="danger" />
         </View>
       ) : null}
     </Pressable>
@@ -354,7 +358,13 @@ export function AgentList({
   }, [actionAgent, actionClient, archiveAgent]);
 
   const flatItems = useMemo((): FlatListItem[] => {
-    const order = ["Today", "Yesterday", "This week", "This month", "Older"] as const;
+    const order = [
+      t("Today"),
+      t("Yesterday"),
+      t("This week"),
+      t("This month"),
+      t("Older"),
+    ] as const;
     const buckets = new Map<string, AggregatedAgent[]>();
     for (const agent of agents) {
       const label = deriveDateSectionLabel(agent.lastActivityAt);
@@ -454,8 +464,8 @@ export function AgentList({
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle}>
               {isActionDaemonUnavailable
-                ? "Host offline"
-                : "This agent is still running. Archiving it will stop the agent."}
+                ? t("Host offline")
+                : t("This agent is still running. Archiving it will stop the agent.")}
             </Text>
             <View style={styles.sheetButtonRow}>
               <Pressable
@@ -463,7 +473,7 @@ export function AgentList({
                 onPress={handleCloseActionSheet}
                 testID="agent-action-cancel"
               >
-                <Text style={styles.sheetCancelText}>Cancel</Text>
+                <Text style={styles.sheetCancelText}>{t("Cancel")}</Text>
               </Pressable>
               <Pressable
                 disabled={isActionDaemonUnavailable}
@@ -471,7 +481,7 @@ export function AgentList({
                 onPress={handleArchiveAgent}
                 testID="agent-action-archive"
               >
-                <Text style={sheetArchiveTextStyle}>Archive</Text>
+                <Text style={sheetArchiveTextStyle}>{t("Archive")}</Text>
               </Pressable>
             </View>
           </View>

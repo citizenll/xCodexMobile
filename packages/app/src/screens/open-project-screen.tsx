@@ -18,6 +18,7 @@ import {
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { useIsLocalDaemon } from "@/hooks/use-is-local-daemon";
 import { PairDeviceModal } from "@/desktop/components/pair-device-modal";
+import { t } from "@/i18n";
 
 export function OpenProjectScreen({ serverId }: { serverId: string }) {
   const openDesktopAgentList = usePanelStore((s) => s.openDesktopAgentList);
@@ -51,10 +52,10 @@ export function OpenProjectScreen({ serverId }: { serverId: string }) {
           <PaseoLogo size={56} />
         </View>
         <View style={styles.headingGroup}>
-          <Text style={styles.heading}>What shall we build today?</Text>
+          <Text style={styles.heading}>{t("What shall we build today?")}</Text>
           {hasHydrated && !hasProjects ? (
             <Text style={styles.subtitle}>
-              Add a project folder to start running agents on your codebase
+              {t("Add a project folder to start running agents on your codebase")}
             </Text>
           ) : null}
         </View>
@@ -65,7 +66,7 @@ export function OpenProjectScreen({ serverId }: { serverId: string }) {
             onPress={handleOpenPicker}
             testID="open-project-submit"
           >
-            Add a project
+            {t("Add a project")}
           </Button>
           {isLocalDaemon ? (
             <Button
@@ -74,7 +75,7 @@ export function OpenProjectScreen({ serverId }: { serverId: string }) {
               onPress={handleOpenPairDevice}
               testID="open-project-pair-device"
             >
-              Pair device
+              {t("Pair device")}
             </Button>
           ) : null}
         </View>

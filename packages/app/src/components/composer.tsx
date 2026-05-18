@@ -99,6 +99,7 @@ import { useIsDictationReady } from "@/hooks/use-is-dictation-ready";
 import { useGithubSearchQuery } from "@/git/use-github-search-query";
 import { useCheckoutStatusQuery } from "@/git/use-status-query";
 import { useComposerGithubAutoAttach } from "./use-composer-github-auto-attach";
+import { t } from "@/i18n";
 
 type QueuedMessage = QueuedComposerMessage;
 
@@ -451,7 +452,7 @@ function QueuedMessageRow({ item, onEdit, onSendNow }: QueuedMessageRowProps) {
         <Pressable
           onPress={handleEdit}
           style={styles.queueActionButton}
-          accessibilityLabel="Edit queued message"
+          accessibilityLabel={t("Edit queued message")}
           accessibilityRole="button"
         >
           <ThemedPencil size={ICON_SIZE.sm} uniProps={iconForegroundMapping} />
@@ -459,7 +460,7 @@ function QueuedMessageRow({ item, onEdit, onSendNow }: QueuedMessageRowProps) {
         <Pressable
           onPress={handleSendNow}
           style={QUEUE_SEND_BUTTON_STYLE}
-          accessibilityLabel="Send queued message now"
+          accessibilityLabel={t("Send queued message now")}
           accessibilityRole="button"
         >
           <ArrowUp size={ICON_SIZE.sm} color="white" />
@@ -504,8 +505,8 @@ function ImageAttachmentPill({
       testID="composer-image-attachment-pill"
       onOpen={handleOpen}
       onRemove={handleRemove}
-      openAccessibilityLabel="Open image attachment"
-      removeAccessibilityLabel="Remove image attachment"
+      openAccessibilityLabel={t("Open image attachment")}
+      removeAccessibilityLabel={t("Remove image attachment")}
       disabled={disabled}
     >
       <ImageAttachmentThumbnail image={attachment.metadata} />
@@ -647,8 +648,10 @@ interface ComposerProps {
 }
 
 const EMPTY_ARRAY: readonly QueuedMessage[] = [];
-const DESKTOP_MESSAGE_PLACEHOLDER = "Message the agent, tag @files, or use /commands and /skills";
-const MOBILE_MESSAGE_PLACEHOLDER = "Message, @files, /commands";
+const DESKTOP_MESSAGE_PLACEHOLDER = t(
+  "Message the agent, tag @files, or use /commands and /skills",
+);
+const MOBILE_MESSAGE_PLACEHOLDER = t("Message, @files, /commands");
 const StableMessageInput = memo(MessageInput);
 
 function resolveContextWindowValues(
@@ -678,7 +681,7 @@ function ComposerCancelButton({
   isCancellingAgent,
   agentInterruptKeys,
 }: ComposerCancelButtonProps) {
-  const accessibilityLabel = isCancellingAgent ? "Canceling agent" : "Stop agent";
+  const accessibilityLabel = isCancellingAgent ? t("Canceling agent") : t("Stop agent");
   const icon = isCancellingAgent ? (
     <ActivityIndicator size="small" color="white" />
   ) : (
@@ -698,7 +701,7 @@ function ComposerCancelButton({
       </TooltipTrigger>
       <TooltipContent side="top" align="center" offset={8}>
         <View style={styles.tooltipRow}>
-          <Text style={styles.tooltipText}>Interrupt</Text>
+          <Text style={styles.tooltipText}>{t("Interrupt")}</Text>
           {shortcutNode}
         </View>
       </TooltipContent>
@@ -786,7 +789,7 @@ function ComposerVoiceModeButton({
       <TooltipTrigger
         onPress={handleToggleRealtimeVoice}
         disabled={!isConnected || isVoiceSwitching}
-        accessibilityLabel="Enable Voice mode"
+        accessibilityLabel={t("Enable Voice mode")}
         accessibilityRole="button"
         style={realtimeVoiceButtonStyle}
       >
@@ -794,7 +797,7 @@ function ComposerVoiceModeButton({
       </TooltipTrigger>
       <TooltipContent side="top" align="center" offset={8}>
         <View style={styles.tooltipRow}>
-          <Text style={styles.tooltipText}>Voice mode</Text>
+          <Text style={styles.tooltipText}>{t("Voice mode")}</Text>
           {shortcutNode}
         </View>
       </TooltipContent>
@@ -977,7 +980,7 @@ export function Composer({
         return;
       }
       if (!sendAgentMessageRef.current) {
-        throw new Error("Host is not connected");
+        throw new Error(t("Host is not connected"));
       }
       await sendAgentMessageRef.current(agentIdRef.current, text, submitAttachments);
     },
@@ -995,7 +998,7 @@ export function Composer({
       sendAttachments: ComposerAttachment[],
     ) => {
       if (!client) {
-        throw new Error("Host is not connected");
+        throw new Error(t("Host is not connected"));
       }
       const stream: AgentStreamWriter = {
         getHead: (id) => useSessionStore.getState().sessions[serverId]?.agentStreamHead?.get(id),
@@ -1403,7 +1406,7 @@ export function Composer({
     () => [
       {
         id: "image",
-        label: "Add image",
+        label: t("Add image"),
         icon: <ThemedPaperclip size={ICON_SIZE.md} uniProps={iconForegroundMutedMapping} />,
         onSelect: () => {
           void handlePickImage();
@@ -1411,7 +1414,7 @@ export function Composer({
       },
       {
         id: "github",
-        label: "Add issue or PR",
+        label: t("Add issue or PR"),
         icon: <ThemedGithub size={ICON_SIZE.md} uniProps={iconForegroundMutedMapping} />,
         onSelect: () => {
           setIsGithubPickerOpen(true);
@@ -1538,8 +1541,8 @@ export function Composer({
     [sendError],
   );
   const githubEmptyText = githubSearchResultsQuery.isFetching
-    ? "Searching..."
-    : "No results found.";
+    ? t("Searching...")
+    : t("No results found.");
 
   return (
     <Animated.View style={composerContainerStyle}>
@@ -1599,8 +1602,8 @@ export function Composer({
               onSelect={noop}
               keepOpenOnSelect
               searchable
-              searchPlaceholder="Search issues and PRs..."
-              title="Attach issue or PR"
+              searchPlaceholder={t("Search issues and PRs...")}
+              title={t("Attach issue or PR")}
               open={isGithubPickerOpen}
               onOpenChange={handleGithubPickerOpenChange}
               onSearchQueryChange={setGithubSearchQuery}

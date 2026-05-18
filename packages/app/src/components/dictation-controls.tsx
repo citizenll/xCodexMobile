@@ -5,6 +5,7 @@ import { X, ArrowUp, RefreshCcw, Check, Mic, Pencil } from "lucide-react-native"
 import { VolumeMeter } from "./volume-meter";
 import { FOOTER_HEIGHT } from "@/constants/layout";
 import type { DictationStatus } from "@/hooks/use-dictation";
+import { t } from "@/i18n";
 
 interface DictationControlsProps {
   volume: number;
@@ -71,7 +72,7 @@ export function DictationControls({
         onPress={onStart}
         disabled={disabled}
         accessibilityRole="button"
-        accessibilityLabel="Start voice dictation"
+        accessibilityLabel={t("Start voice dictation")}
         style={micButtonStyle}
       >
         <Mic size={theme.iconSize.md} color={theme.colors.foreground} />
@@ -89,7 +90,7 @@ export function DictationControls({
         <Pressable
           onPress={handleCancel}
           disabled={actionsDisabled && !isFailed}
-          accessibilityLabel="Cancel dictation"
+          accessibilityLabel={t("Cancel dictation")}
           style={cancelButtonStyle}
         >
           <X size={theme.iconSize.sm} color={theme.colors.foreground} />
@@ -102,7 +103,7 @@ export function DictationControls({
         {!actionsDisabled && isFailed ? (
           <Pressable
             onPress={onRetry}
-            accessibilityLabel="Retry dictation"
+            accessibilityLabel={t("Retry dictation")}
             style={ACTION_CONFIRM_STYLE}
           >
             <RefreshCcw size={theme.iconSize.sm} color={theme.colors.surface0} />
@@ -112,14 +113,14 @@ export function DictationControls({
           <>
             <Pressable
               onPress={onAccept}
-              accessibilityLabel="Insert transcription"
+              accessibilityLabel={t("Insert transcription")}
               style={ACTION_SECONDARY_STYLE}
             >
               <Check size={theme.iconSize.sm} color={theme.colors.foreground} />
             </Pressable>
             <Pressable
               onPress={onAcceptAndSend}
-              accessibilityLabel="Insert transcription and send"
+              accessibilityLabel={t("Insert transcription and send")}
               style={ACTION_CONFIRM_STYLE}
             >
               <ArrowUp size={theme.iconSize.sm} color={theme.colors.surface0} />
@@ -189,7 +190,7 @@ export function DictationOverlay({
         onPress={handleCancel}
         disabled={actionsDisabled && !isFailed}
         accessibilityRole="button"
-        accessibilityLabel="Cancel dictation"
+        accessibilityLabel={t("Cancel dictation")}
         style={overlayCancelButtonStyle}
       >
         <X size={theme.iconSize.lg} color={theme.colors.palette.white} strokeWidth={2.5} />
@@ -208,7 +209,9 @@ export function DictationOverlay({
         </View>
         {isFailed ? (
           <Text numberOfLines={2} style={overlayTranscriptTextStyle}>
-            {errorText ? `Dictation failed: ${errorText}` : "Dictation failed. Tap retry."}
+            {errorText
+              ? t("Dictation failed: {message}", { message: errorText })
+              : t("Dictation failed. Tap retry.")}
           </Text>
         ) : null}
       </View>
@@ -223,7 +226,7 @@ export function DictationOverlay({
           <Pressable
             onPress={onRetry}
             accessibilityRole="button"
-            accessibilityLabel="Retry dictation"
+            accessibilityLabel={t("Retry dictation")}
             style={overlayRetryButtonStyle}
           >
             <RefreshCcw size={theme.iconSize.lg} color={theme.colors.accent} strokeWidth={2.5} />
@@ -234,7 +237,7 @@ export function DictationOverlay({
             <Pressable
               onPress={onAccept}
               accessibilityRole="button"
-              accessibilityLabel="Insert transcription"
+              accessibilityLabel={t("Insert transcription")}
               style={OVERLAY_ACCEPT_BUTTON_STYLE}
             >
               <Pencil
@@ -246,7 +249,7 @@ export function DictationOverlay({
             <Pressable
               onPress={onAcceptAndSend}
               accessibilityRole="button"
-              accessibilityLabel="Insert transcription and send"
+              accessibilityLabel={t("Insert transcription and send")}
               style={overlayConfirmButtonStyle}
             >
               <ArrowUp size={theme.iconSize.lg} color={theme.colors.accent} strokeWidth={2.5} />

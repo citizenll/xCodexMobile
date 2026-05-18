@@ -3,6 +3,7 @@ import { Pressable, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { Import as ImportIcon } from "lucide-react-native";
 import type { Theme } from "@/styles/theme";
+import { t } from "@/i18n";
 
 const ThemedImportIcon = withUnistyles(ImportIcon);
 const iconColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
@@ -22,7 +23,7 @@ export function ComposerImportPill({ onPress, disabled = false }: ComposerImport
       <Pressable
         testID="composer-import-agent-pill"
         accessibilityRole="button"
-        accessibilityLabel="Import session"
+        accessibilityLabel={t("Import session")}
         onPress={onPress}
         disabled={disabled}
         onHoverIn={handleHoverIn}
@@ -31,7 +32,7 @@ export function ComposerImportPill({ onPress, disabled = false }: ComposerImport
       >
         <ThemedImportIcon size={14} uniProps={iconColorMapping} />
         <Text style={styles.label} numberOfLines={1}>
-          Import session
+          {t("Import session")}
         </Text>
       </Pressable>
     </View>

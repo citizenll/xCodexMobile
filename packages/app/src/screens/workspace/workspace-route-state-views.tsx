@@ -6,6 +6,7 @@ import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatConnectionStatus } from "@/utils/daemons";
 import type { WorkspaceRouteState } from "@/screens/workspace/workspace-route-state";
+import { t } from "@/i18n";
 
 interface WorkspaceRouteStateActions {
   onRetryHost: () => void;
@@ -45,12 +46,12 @@ function getWorkspaceHostStateTitle(
   state: Extract<WorkspaceRouteState, { kind: "unreachable" }>,
 ): string {
   if (state.connectionStatus === "connecting" || state.connectionStatus === "idle") {
-    return "Connecting";
+    return t("Connecting");
   }
   if (state.connectionStatus === "offline") {
-    return `${state.hostName} is offline`;
+    return t("{name} is offline", { name: state.hostName });
   }
-  return `Cannot reach ${state.hostName}`;
+  return t("Cannot reach {name}", { name: state.hostName });
 }
 
 function WorkspaceConnecting({ hostName }: { hostName: string }) {
@@ -60,7 +61,7 @@ function WorkspaceConnecting({ hostName }: { hostName: string }) {
     <View style={styles.emptyState}>
       <LoadingSpinner size="small" color={theme.colors.foregroundMuted} />
       <View style={styles.textStack}>
-        <Text style={styles.title}>Loading workspace</Text>
+        <Text style={styles.title}>{t("Loading workspace")}</Text>
         <Text style={styles.description}>{hostName}</Text>
       </View>
     </View>
@@ -89,7 +90,9 @@ function WorkspaceUnreachable({
         <Text style={styles.description}>
           {state.connectionStatus === "connecting" || state.connectionStatus === "idle"
             ? state.hostName
-            : `Host status: ${formatConnectionStatus(state.connectionStatus)}`}
+            : t("Host status: {status}", {
+                status: formatConnectionStatus(state.connectionStatus),
+              })}
         </Text>
         {state.lastError ? (
           <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
@@ -107,10 +110,10 @@ function WorkspaceUnreachable({
       {canRetry ? (
         <View style={styles.actions}>
           <Button size="sm" variant="default" leftIcon={RotateCw} onPress={onRetry}>
-            Retry
+            {t("Retry")}
           </Button>
           <Button size="sm" variant="outline" leftIcon={Settings} onPress={onManageHost}>
-            Manage host
+            {t("Manage host")}
           </Button>
         </View>
       ) : null}
@@ -122,12 +125,12 @@ function WorkspaceMissing({ hostName, onDismiss }: { hostName: string; onDismiss
   return (
     <View style={styles.emptyState}>
       <View style={styles.textStack}>
-        <Text style={styles.title}>Workspace not found</Text>
+        <Text style={styles.title}>{t("Workspace not found")}</Text>
         <Text style={styles.description}>{hostName}</Text>
       </View>
       <View style={styles.actions}>
         <Button size="sm" variant="default" leftIcon={ArrowLeftToLine} onPress={onDismiss}>
-          Back
+          {t("Back")}
         </Button>
       </View>
     </View>

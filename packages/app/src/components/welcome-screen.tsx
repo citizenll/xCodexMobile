@@ -21,6 +21,7 @@ import { PaseoLogo } from "@/components/icons/paseo-logo";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { isWeb, isNative } from "@/constants/platform";
 import { discoverXcodexLanHosts } from "@/utils/lan-discovery";
+import { t } from "@/i18n";
 
 interface WelcomeAction {
   key: "lan-discovery" | "scan-qr" | "direct-connection" | "paste-pairing-link";
@@ -214,14 +215,14 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
     try {
       const [result] = await discoverXcodexLanHosts({ maxResults: 1 });
       if (!result) {
-        setLanDiscoveryError("No xCodex connector found on this local network.");
+        setLanDiscoveryError(t("No xCodex connector found on this local network."));
         return;
       }
       const profile = await upsertConnectionFromOffer(result.offer, result.hostname ?? "xCodex");
       onHostAdded?.(profile);
       finishOnboarding(result.offer.serverId);
     } catch (error) {
-      setLanDiscoveryError(error instanceof Error ? error.message : "LAN discovery failed.");
+      setLanDiscoveryError(error instanceof Error ? error.message : t("LAN discovery failed."));
     } finally {
       setIsDiscoveringLan(false);
     }
@@ -239,7 +240,7 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
     ? [
         {
           key: "direct-connection",
-          label: "Direct connection",
+          label: t("Direct connection"),
           testID: "welcome-direct-connection",
           primary: true,
           icon: Link2,
@@ -247,7 +248,7 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
         },
         {
           key: "paste-pairing-link",
-          label: "Paste pairing link",
+          label: t("Paste pairing link"),
           testID: "welcome-paste-pairing-link",
           primary: false,
           icon: ClipboardPaste,
@@ -257,7 +258,7 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
     : [
         {
           key: "lan-discovery",
-          label: isDiscoveringLan ? "Searching LAN..." : "Find on LAN",
+          label: isDiscoveringLan ? t("Searching LAN...") : t("Find on LAN"),
           testID: "welcome-lan-discovery",
           primary: true,
           icon: Link2,
@@ -265,7 +266,7 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
         },
         {
           key: "scan-qr",
-          label: "Scan QR code",
+          label: t("Scan QR code"),
           testID: "welcome-scan-qr",
           primary: false,
           icon: QrCode,
@@ -273,7 +274,7 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
         },
         {
           key: "direct-connection",
-          label: "Direct connection",
+          label: t("Direct connection"),
           testID: "welcome-direct-connection",
           primary: false,
           icon: Link2,
@@ -281,7 +282,7 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
         },
         {
           key: "paste-pairing-link",
-          label: "Paste pairing link",
+          label: t("Paste pairing link"),
           testID: "welcome-paste-pairing-link",
           primary: false,
           icon: ClipboardPaste,
@@ -305,8 +306,8 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
         <View style={styles.content}>
           <PaseoLogo size={96} />
           <View style={styles.copyBlock}>
-            <Text style={styles.title}>Welcome to xCodex</Text>
-            <Text style={styles.subtitle}>Connect your computer to get started</Text>
+            <Text style={styles.title}>{t("Welcome to xCodex")}</Text>
+            <Text style={styles.subtitle}>{t("Connect your computer to get started")}</Text>
             {isNative ? (
               <Pressable style={styles.setupLink} onPress={handleOpenXcodexSite}>
                 <Text style={styles.setupLinkText}>xCodex</Text>
@@ -330,7 +331,7 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
             style={styles.settingsButton}
             testID="welcome-open-settings"
           >
-            Settings
+            {t("Settings")}
           </Button>
         </View>
         <Text style={styles.versionLabel}>{appVersionText}</Text>

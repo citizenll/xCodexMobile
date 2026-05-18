@@ -14,6 +14,7 @@ import { useDaemonConfig } from "@/hooks/use-daemon-config";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import type { Theme } from "@/styles/theme";
 import { openExternalUrl } from "@/utils/open-external-url";
+import { t } from "@/i18n";
 
 interface AddProviderModalProps {
   serverId: string;
@@ -65,11 +66,11 @@ interface ProviderCatalogRowProps {
 
 function ProviderCatalogRow({ entry, state, installing, onInstall }: ProviderCatalogRowProps) {
   const isAvailable = state === "available";
-  let actionLabel = "Add";
+  let actionLabel = t("Add");
   if (installing) {
-    actionLabel = "Adding";
+    actionLabel = t("Adding");
   } else if (state === "installed") {
-    actionLabel = "Installed";
+    actionLabel = t("Installed");
   }
 
   const handleInstall = useCallback(() => {
@@ -113,7 +114,7 @@ function ProviderCatalogRow({ entry, state, installing, onInstall }: ProviderCat
           style={styles.installLink}
         >
           <Text style={styles.installLinkText} numberOfLines={1}>
-            Install instructions
+            {t("Install instructions")}
           </Text>
           <ThemedExternalLink size={12} uniProps={foregroundMutedColorMapping} />
         </Pressable>
@@ -160,7 +161,7 @@ export function AddProviderModal({ serverId, visible, onClose }: AddProviderModa
         onClose();
       } catch (installError) {
         Alert.alert(
-          "Unable to install provider",
+          t("Unable to install provider"),
           installError instanceof Error ? installError.message : String(installError),
         );
       } finally {
@@ -172,7 +173,7 @@ export function AddProviderModal({ serverId, visible, onClose }: AddProviderModa
 
   return (
     <AdaptiveModalSheet
-      title="Add provider"
+      title={t("Add provider")}
       visible={visible}
       onClose={onClose}
       desktopMaxWidth={680}
@@ -185,10 +186,10 @@ export function AddProviderModal({ serverId, visible, onClose }: AddProviderModa
         </View>
         <AdaptiveTextInput
           testID="provider-catalog-search"
-          accessibilityLabel="Search providers"
+          accessibilityLabel={t("Search providers")}
           value={search}
           onChangeText={setSearch}
-          placeholder="Search providers"
+          placeholder={t("Search providers")}
           style={styles.searchInput}
           autoCapitalize="none"
           autoCorrect={false}
@@ -197,7 +198,7 @@ export function AddProviderModal({ serverId, visible, onClose }: AddProviderModa
 
       {filteredEntries.length === 0 ? (
         <View style={styles.stateBox}>
-          <Text style={styles.stateText}>No providers found</Text>
+          <Text style={styles.stateText}>{t("No providers found")}</Text>
         </View>
       ) : null}
 
@@ -217,7 +218,7 @@ export function AddProviderModal({ serverId, visible, onClose }: AddProviderModa
 
       <View style={styles.actions}>
         <Button style={FLEX_ONE_STYLE} variant="secondary" onPress={onClose}>
-          Cancel
+          {t("Cancel")}
         </Button>
       </View>
     </AdaptiveModalSheet>

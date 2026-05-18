@@ -114,6 +114,7 @@ import {
 import { WorkspaceHoverCard } from "@/components/workspace-hover-card";
 import { GitHubIcon } from "@/components/icons/github-icon";
 import { isWeb as platformIsWeb, isNative as platformIsNative } from "@/constants/platform";
+import { t } from "@/i18n";
 
 function toProjectIconDataUri(icon: { mimeType: string; data: string } | null): string | null {
   if (!icon) {
@@ -595,7 +596,7 @@ function ProjectKebabMenu({
         hitSlop={8}
         style={projectKebabStyle}
         accessibilityRole="button"
-        accessibilityLabel="Project actions"
+        accessibilityLabel={t("Project actions")}
         testID={`sidebar-project-kebab-${projectKey}`}
       >
         {renderKebabTriggerIcon}
@@ -607,17 +608,17 @@ function ProjectKebabMenu({
             leading={settingsLeadingIcon}
             onSelect={handleOpenProjectSettings}
           >
-            Open project settings
+            {t("Open project settings")}
           </DropdownMenuItem>
         ) : null}
         <DropdownMenuItem
           testID={`sidebar-project-menu-remove-${projectKey}`}
           leading={trash2LeadingIcon}
           status={removeProjectStatus}
-          pendingLabel="Removing..."
+          pendingLabel={t("Removing...")}
           onSelect={onRemoveProject}
         >
-          Remove project
+          {t("Remove project")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -661,7 +662,7 @@ function WorkspaceRowRightGroup({
   return (
     <View style={styles.workspaceRowRight}>
       {showScriptsIcon ? (
-        <View testID="workspace-globe-icon" accessibilityLabel="Scripts available">
+        <View testID="workspace-globe-icon" accessibilityLabel={t("Scripts available")}>
           {hasRunningService ? (
             <ThemedGlobe size={12} uniProps={blueColorMapping} />
           ) : (
@@ -669,7 +670,7 @@ function WorkspaceRowRightGroup({
           )}
         </View>
       ) : null}
-      {isCreating ? <Text style={styles.workspaceCreatingText}>Creating...</Text> : null}
+      {isCreating ? <Text style={styles.workspaceCreatingText}>{t("Creating...")}</Text> : null}
       {showKebab && onArchive ? (
         <WorkspaceKebabMenu
           workspaceKey={workspace.workspaceKey}
@@ -726,7 +727,7 @@ function WorkspaceKebabMenu({
         hitSlop={8}
         style={workspaceKebabStyle}
         accessibilityRole="button"
-        accessibilityLabel="Workspace actions"
+        accessibilityLabel={t("Workspace actions")}
         testID={`sidebar-workspace-kebab-${workspaceKey}`}
       >
         {renderKebabTriggerIcon}
@@ -738,7 +739,7 @@ function WorkspaceKebabMenu({
             leading={copyLeadingIcon}
             onSelect={onCopyPath}
           >
-            Copy path
+            {t("Copy path")}
           </DropdownMenuItem>
         ) : null}
         {onCopyBranchName ? (
@@ -747,7 +748,7 @@ function WorkspaceKebabMenu({
             leading={copyLeadingIcon}
             onSelect={onCopyBranchName}
           >
-            Copy branch name
+            {t("Copy branch name")}
           </DropdownMenuItem>
         ) : null}
         <DropdownMenuItem
@@ -758,7 +759,7 @@ function WorkspaceKebabMenu({
           pendingLabel={archivePendingLabel}
           onSelect={onArchive}
         >
-          {archiveLabel ?? "Archive"}
+          {archiveLabel ?? t("Archive")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -915,7 +916,7 @@ function NewWorktreeButton({
         </TooltipTrigger>
         <TooltipContent side="bottom" align="center" offset={8}>
           <View style={styles.projectActionTooltipRow}>
-            <Text style={styles.projectActionTooltipText}>New workspace</Text>
+            <Text style={styles.projectActionTooltipText}>{t("New workspace")}</Text>
             {showShortcutHint && newWorktreeKeys ? (
               <Shortcut chord={newWorktreeKeys} style={styles.projectActionTooltipShortcut} />
             ) : null}
@@ -2474,10 +2475,10 @@ export function SidebarWorkspaceList({
     <>
       {projects.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyTitle}>No projects yet</Text>
-          <Text style={styles.emptyText}>Add a project to get started</Text>
+          <Text style={styles.emptyTitle}>{t("No projects yet")}</Text>
+          <Text style={styles.emptyText}>{t("Add a project to get started")}</Text>
           <Button variant="ghost" size="sm" leftIcon={Plus} onPress={onAddProject}>
-            Add project
+            {t("Add project")}
           </Button>
         </View>
       ) : (

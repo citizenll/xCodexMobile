@@ -58,6 +58,7 @@ import type { AgentScreenAgent } from "@/hooks/use-agent-screen-state-machine";
 import { useSessionStore } from "@/stores/session-store";
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
 import { useLoadOlderAgentHistory } from "@/hooks/use-load-older-agent-history";
+import { t } from "@/i18n";
 import type { ToastApi } from "@/components/toast-host";
 import type { DaemonClient } from "@server/client/daemon-client";
 import { ToolCallDetailsContent } from "./tool-call-details";
@@ -683,7 +684,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
 
       return (
         <View style={emptyStateStyle}>
-          <Text style={stylesheet.emptyStateText}>Start chatting with this agent...</Text>
+          <Text style={stylesheet.emptyStateText}>{t("Start chatting with this agent...")}</Text>
         </View>
       );
     }, [renderModel, emptyStateStyle]);
@@ -805,7 +806,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
                   style={stylesheet.scrollToBottomButton}
                   onPress={scrollToBottom}
                   accessibilityRole="button"
-                  accessibilityLabel="Scroll to bottom"
+                  accessibilityLabel={t("Scroll to bottom")}
                   testID="scroll-to-bottom-button"
                 >
                   <ChevronDown size={24} color={stylesheet.scrollToBottomIcon.color} />
@@ -1222,7 +1223,7 @@ function PermissionRequestCard({
 
       {planMarkdown ? (
         <PlanCard
-          title="Proposed plan"
+          title={t("Proposed plan")}
           text={planMarkdown}
           testID="permission-plan-card"
           disableOuterSpacing

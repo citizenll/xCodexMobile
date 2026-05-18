@@ -40,6 +40,7 @@ import {
   type PickerItem,
 } from "./new-workspace-picker-item";
 import { findCheckoutHintPrAttachment, syncPickerPrAttachment } from "./new-workspace-picker-state";
+import { t } from "@/i18n";
 
 function resolveCheckoutRequest(
   selectedItem: PickerItem | null,
@@ -131,7 +132,7 @@ function RefPickerTrigger({
           disabled={disabled}
           style={badgePressableStyle}
           accessibilityRole="button"
-          accessibilityLabel="Starting ref"
+          accessibilityLabel={t("Starting ref")}
         >
           <RefPickerBadgeContent
             selectedItem={selectedItem}
@@ -142,7 +143,7 @@ function RefPickerTrigger({
         </Pressable>
       </TooltipTrigger>
       <TooltipContent side="top" align="center" offset={8}>
-        <Text style={styles.tooltipText}>Choose where to start from</Text>
+        <Text style={styles.tooltipText}>{t("Choose where to start from")}</Text>
       </TooltipContent>
     </Tooltip>
   );
@@ -164,14 +165,14 @@ function CheckoutHintBadge({
   return (
     <View style={styles.checkoutHintBadge}>
       <Text style={styles.badgeText} numberOfLines={1}>
-        Check out PR #{prNumber}?
+        {t("Check out PR #{number}?", { number: prNumber })}
       </Text>
       <Pressable
         testID="new-workspace-checkout-hint-accept"
         onPress={onAccept}
         style={styles.checkoutHintAction}
         accessibilityRole="button"
-        accessibilityLabel={`Check out PR #${prNumber}`}
+        accessibilityLabel={t("Check out PR #{number}", { number: prNumber })}
       >
         <Check size={iconSize} color={iconColor} />
       </Pressable>
@@ -287,7 +288,7 @@ function computePickerOptionData(
   }
 
   timedOptions.sort((a, b) => b.timestamp - a.timestamp);
-  return { options: timedOptions.map((t) => t.option), itemById: idMap };
+  return { options: timedOptions.map((entry) => entry.option), itemById: idMap };
 }
 
 function normalizeBranchDetails(
@@ -325,7 +326,7 @@ async function createAndMergeWorkspace(input: {
 }): Promise<ReturnType<typeof normalizeWorkspaceDescriptor>> {
   const payload = await input.client.createPaseoWorktree(input.createInput);
   if (payload.error || !payload.workspace) {
-    throw new Error(payload.error ?? "Failed to create worktree");
+    throw new Error(payload.error ?? t("Failed to create worktree"));
   }
   const normalizedWorkspace = normalizeWorkspaceDescriptor(payload.workspace);
   input.mergeWorkspaces(input.serverId, [normalizedWorkspace]);
@@ -352,7 +353,7 @@ async function runCreateChatAgent(input: CreateChatAgentInput): Promise<void> {
   }
   const provider = composerState.selectedProvider;
   if (!provider) {
-    throw new Error("Select a model");
+    throw new Error(t("Select a model"));
   }
   const { attachments: reviewAttachments } = splitComposerAttachmentsForSubmit(attachments);
   const ensuredWorkspace = await ensureWorkspace({
@@ -548,7 +549,7 @@ export function NewWorkspaceScreen({
 
   const withConnectedClient = useCallback(() => {
     if (!client || !isConnected) {
-      throw new Error("Host is not connected");
+      throw new Error(t("Host is not connected"));
     }
     return client;
   }, [client, isConnected]);
@@ -857,8 +858,8 @@ export function NewWorkspaceScreen({
 
   const pickerEmptyText =
     branchSuggestionsQuery.isFetching || githubPrSearchQuery.isFetching
-      ? "Searching..."
-      : "No matching refs.";
+      ? t("Searching...")
+      : t("No matching refs.");
 
   return (
     <FileDropZone onFilesDropped={handleFilesDropped}>
@@ -922,8 +923,8 @@ export function NewWorkspaceScreen({
                   value={selectedOptionId}
                   onSelect={handleSelectOption}
                   searchable
-                  searchPlaceholder="Search branches and PRs"
-                  title="Start from"
+                  searchPlaceholder={t("Search branches and PRs")}
+                  title={t("Start from")}
                   open={pickerOpen}
                   onOpenChange={handlePickerOpenChange}
                   onSearchQueryChange={setPickerSearchQuery}

@@ -31,6 +31,7 @@ import { useAttachmentPreviewUrl } from "@/attachments/use-attachment-preview-ur
 import { persistAttachmentFromBytes } from "@/attachments/service";
 import { createPreviewAttachmentId, getFileNameFromPath } from "@/attachments/utils";
 import { explorerFileFromReadResult } from "@/file-explorer/read-result";
+import { t } from "@/i18n";
 
 interface CodeLineProps {
   tokens: HighlightToken[];
@@ -213,7 +214,7 @@ function FilePreviewBody({
     return (
       <View style={styles.centerState}>
         <ActivityIndicator size="small" />
-        <Text style={styles.loadingText}>Loading file…</Text>
+        <Text style={styles.loadingText}>{t("Loading file…")}</Text>
       </View>
     );
   }
@@ -221,7 +222,7 @@ function FilePreviewBody({
   if (!preview) {
     return (
       <View style={styles.centerState}>
-        <Text style={styles.emptyText}>No preview available</Text>
+        <Text style={styles.emptyText}>{t("No preview available")}</Text>
       </View>
     );
   }
@@ -305,7 +306,7 @@ function FilePreviewBody({
       return (
         <View style={styles.centerState}>
           <ActivityIndicator size="small" />
-          <Text style={styles.loadingText}>Loading file…</Text>
+          <Text style={styles.loadingText}>{t("Loading file…")}</Text>
         </View>
       );
     }
@@ -335,7 +336,7 @@ function FilePreviewBody({
 
   return (
     <View style={styles.centerState}>
-      <Text style={styles.emptyText}>Binary preview unavailable</Text>
+      <Text style={styles.emptyText}>{t("Binary preview unavailable")}</Text>
       <Text style={styles.binaryMetaText}>{formatFileSize({ size: preview.size })}</Text>
     </View>
   );
@@ -362,7 +363,7 @@ export function FilePane({
     enabled: Boolean(client && normalizedWorkspaceRoot && normalizedFilePath),
     queryFn: async () => {
       if (!client || !normalizedWorkspaceRoot || !normalizedFilePath) {
-        return { file: null as ExplorerFile | null, error: "Host is not connected" };
+        return { file: null as ExplorerFile | null, error: t("Host is not connected") };
       }
       try {
         const file = await client.readFile(normalizedWorkspaceRoot, normalizedFilePath);
@@ -376,7 +377,7 @@ export function FilePane({
         return {
           file: null,
           imageAttachment: null,
-          error: error instanceof Error ? error.message : "Failed to load file",
+          error: error instanceof Error ? error.message : t("Failed to load file"),
         };
       }
     },

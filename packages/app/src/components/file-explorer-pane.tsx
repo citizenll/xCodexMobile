@@ -45,11 +45,12 @@ import { formatTimeAgo } from "@/utils/time";
 import { buildAbsoluteExplorerPath } from "@/utils/explorer-paths";
 import { useWebScrollViewScrollbar } from "@/components/use-web-scrollbar";
 import { isWeb } from "@/constants/platform";
+import { t } from "@/i18n";
 
 const SORT_OPTIONS: { value: SortOption; label: string }[] = [
-  { value: "name", label: "Name" },
-  { value: "modified", label: "Modified" },
-  { value: "size", label: "Size" },
+  { value: "name", label: t("Name") },
+  { value: "modified", label: t("Modified") },
+  { value: "size", label: t("Size") },
 ];
 
 const INDENT_PER_LEVEL = 16;
@@ -182,7 +183,7 @@ function TreeRowItem({
           <View style={styles.contextMetaBlock}>
             <View style={styles.contextMetaRow}>
               <Text style={styles.contextMetaLabel} numberOfLines={1}>
-                Size
+                {t("Size")}
               </Text>
               <Text style={styles.contextMetaValue} numberOfLines={1} ellipsizeMode="tail">
                 {formatFileSize({ size: entry.size })}
@@ -190,7 +191,7 @@ function TreeRowItem({
             </View>
             <View style={styles.contextMetaRow}>
               <Text style={styles.contextMetaLabel} numberOfLines={1}>
-                Modified
+                {t("Modified")}
               </Text>
               <Text style={styles.contextMetaValue} numberOfLines={1} ellipsizeMode="tail">
                 {formatTimeAgo(new Date(entry.modifiedAt))}
@@ -199,11 +200,11 @@ function TreeRowItem({
           </View>
           <DropdownMenuSeparator />
           <DropdownMenuItem leading={copyLeading} onSelect={handleCopy}>
-            Copy path
+            {t("Copy path")}
           </DropdownMenuItem>
           {entry.kind === "file" ? (
             <DropdownMenuItem leading={downloadLeading} onSelect={handleDownload}>
-              Download
+              {t("Download")}
             </DropdownMenuItem>
           ) : null}
         </DropdownMenuContent>
@@ -454,7 +455,7 @@ export function FileExplorerPane({
   if (!hasWorkspaceScope) {
     return (
       <View style={styles.centerState}>
-        <Text style={styles.errorText}>Workspace is unavailable</Text>
+        <Text style={styles.errorText}>{t("Workspace is unavailable")}</Text>
       </View>
     );
   }
@@ -530,11 +531,11 @@ function FileExplorerPaneContent(props: FileExplorerPaneContentProps) {
         <View style={styles.errorActions}>
           {showBackFromError ? (
             <Pressable style={styles.retryButton} onPress={handleBackFromError}>
-              <Text style={styles.retryButtonText}>Back</Text>
+              <Text style={styles.retryButtonText}>{t("Back")}</Text>
             </Pressable>
           ) : null}
           <Pressable style={styles.retryButton} onPress={handleRetry}>
-            <Text style={styles.retryButtonText}>Retry</Text>
+            <Text style={styles.retryButtonText}>{t("Retry")}</Text>
           </Pressable>
         </View>
       </View>
@@ -545,7 +546,7 @@ function FileExplorerPaneContent(props: FileExplorerPaneContentProps) {
     return (
       <View style={styles.centerState}>
         <ActivityIndicator size="small" />
-        <Text style={styles.loadingText}>Loading files…</Text>
+        <Text style={styles.loadingText}>{t("Loading files…")}</Text>
       </View>
     );
   }
@@ -553,7 +554,7 @@ function FileExplorerPaneContent(props: FileExplorerPaneContentProps) {
   if (treeRows.length === 0) {
     return (
       <View style={styles.centerState}>
-        <Text style={styles.emptyText}>No files</Text>
+        <Text style={styles.emptyText}>{t("No files")}</Text>
       </View>
     );
   }
@@ -571,7 +572,7 @@ function FileExplorerPaneContent(props: FileExplorerPaneContentProps) {
           hitSlop={8}
           style={iconButtonStyleProp}
           accessibilityRole="button"
-          accessibilityLabel={isRefreshFetching ? "Refreshing files" : "Refresh files"}
+          accessibilityLabel={isRefreshFetching ? t("Refreshing files") : t("Refresh files")}
         >
           <View style={styles.refreshIcon}>
             {isRefreshFetching ? (
@@ -706,7 +707,7 @@ function resolveShowInitialLoading({
 }
 
 function resolveCurrentSortLabel(sortOption: SortOption): string {
-  return SORT_OPTIONS.find((opt) => opt.value === sortOption)?.label ?? "Name";
+  return SORT_OPTIONS.find((opt) => opt.value === sortOption)?.label ?? t("Name");
 }
 
 function resolveTreeRows({

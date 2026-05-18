@@ -5,6 +5,7 @@ import { Mic, MicOff, Square } from "lucide-react-native";
 import { FOOTER_HEIGHT } from "@/constants/layout";
 import { useVoiceTelemetry } from "@/contexts/voice-context";
 import { VolumeMeter } from "./volume-meter";
+import { t } from "@/i18n";
 
 interface RealtimeVoiceOverlayProps {
   isMuted: boolean;
@@ -53,7 +54,7 @@ export function RealtimeVoiceOverlay({
           onPress={onToggleMute}
           disabled={isSwitching}
           accessibilityRole="button"
-          accessibilityLabel={isMuted ? "Unmute realtime voice" : "Mute realtime voice"}
+          accessibilityLabel={isMuted ? t("Unmute realtime voice") : t("Mute realtime voice")}
           style={muteButtonStyle}
         >
           {isMuted ? (
@@ -67,7 +68,7 @@ export function RealtimeVoiceOverlay({
           onPress={onStop}
           disabled={isSwitching}
           accessibilityRole="button"
-          accessibilityLabel="Stop realtime voice and interrupt turn"
+          accessibilityLabel={t("Stop realtime voice and interrupt turn")}
           style={stopButtonStyle}
         >
           {isSwitching ? (

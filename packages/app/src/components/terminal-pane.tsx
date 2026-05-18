@@ -35,6 +35,7 @@ import {
   shouldShowTerminalLoadingOverlay,
   type TerminalRendererReadyChange,
 } from "@/utils/terminal-renderer-readiness";
+import { t } from "@/i18n";
 
 interface TerminalPaneProps {
   serverId: string;
@@ -665,7 +666,7 @@ export function TerminalPane({
   if (!client || !isConnected) {
     return (
       <View style={styles.centerState}>
-        <Text style={styles.stateText}>Host is not connected</Text>
+        <Text style={styles.stateText}>{t("Host is not connected")}</Text>
       </View>
     );
   }

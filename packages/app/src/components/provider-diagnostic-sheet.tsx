@@ -23,6 +23,7 @@ import { resolveProviderLabel } from "@/utils/provider-definitions";
 import { formatTimeAgo } from "@/utils/time";
 import type { AgentModelDefinition, AgentProvider } from "@server/server/agent/agent-sdk-types";
 import type { ProviderProfileModel } from "@server/server/agent/provider-launch-config";
+import { t } from "@/i18n";
 
 interface ProviderDiagnosticSheetProps {
   provider: string;
@@ -79,7 +80,7 @@ function CustomModelRow(props: {
         hitSlop={8}
         style={deleteButtonStyle}
         accessibilityRole="button"
-        accessibilityLabel={`Remove ${model.id}`}
+        accessibilityLabel={t("Remove {name}", { name: model.id })}
       >
         <Trash2 size={theme.iconSize.sm} color={theme.colors.destructive} />
       </Pressable>
@@ -138,7 +139,7 @@ function CustomModelsSection(props: {
     ])
       .then(() => setInput(""))
       .catch((err) => {
-        setError(err instanceof Error ? err.message : "Failed to save model");
+        setError(err instanceof Error ? err.message : t("Failed to save model"));
       })
       .finally(() => setSaving(false));
   }, [additionalModels, canAdd, patchAdditionalModels, trimmedInput]);
@@ -149,7 +150,7 @@ function CustomModelsSection(props: {
       setDeletingModelId(modelId);
       void patchAdditionalModels(additionalModels.filter((model) => model.id !== modelId))
         .catch((err) => {
-          setError(err instanceof Error ? err.message : "Failed to delete model");
+          setError(err instanceof Error ? err.message : t("Failed to delete model"));
         })
         .finally(() => {
           setDeletingModelId((current) => (current === modelId ? null : current));
@@ -159,14 +160,14 @@ function CustomModelsSection(props: {
   );
 
   return (
-    <SettingsSection title="Custom models">
+    <SettingsSection title={t("Custom models")}>
       <View style={settingsStyles.card}>
         <View style={INLINE_ROW_STYLE}>
           <AdaptiveTextInput
             value={input}
             onChangeText={setInput}
             onSubmitEditing={handleAdd}
-            placeholder="Model ID"
+            placeholder={t("Model ID")}
             placeholderTextColor={theme.colors.foregroundMuted}
             autoCapitalize="none"
             autoCorrect={false}
@@ -179,9 +180,9 @@ function CustomModelsSection(props: {
             size="sm"
             onPress={handleAdd}
             disabled={!canAdd || saving}
-            accessibilityLabel="Add model"
+            accessibilityLabel={t("Add model")}
           >
-            {saving ? "Adding…" : "Add"}
+            {saving ? t("Adding…") : t("Add")}
           </Button>
         </View>
         {additionalModels.map((model) => (
@@ -207,7 +208,7 @@ function DiagnosticCodeBlock(props: {
     return (
       <View style={sheetStyles.codeBlockLoading}>
         <ActivityIndicator size="small" color={props.foregroundMutedColor} />
-        <Text style={sheetStyles.mutedText}>Running diagnostic…</Text>
+        <Text style={sheetStyles.mutedText}>{t("Running diagnostic…")}</Text>
       </View>
     );
   }
@@ -228,7 +229,7 @@ function DiagnosticCodeBlock(props: {
   }
   return (
     <View style={sheetStyles.codeBlockLoading}>
-      <Text style={sheetStyles.mutedText}>No diagnostic available</Text>
+      <Text style={sheetStyles.mutedText}>{t("No diagnostic available")}</Text>
     </View>
   );
 }
@@ -254,13 +255,13 @@ export function ProviderDiagnosticSheet({
   const models = providerEntry?.models ?? [];
   const providerSnapshotRefreshing = providerEntry?.status === "loading";
   const providerErrorMessage =
-    providerEntry?.status === "error" ? (providerEntry.error ?? "Unknown error") : null;
+    providerEntry?.status === "error" ? (providerEntry.error ?? t("Unknown error")) : null;
   const refreshInFlight = isRefreshing || providerSnapshotRefreshing || loading;
 
   const [clockTick, setClockTick] = useState(0);
   useEffect(() => {
     if (!visible) return;
-    const id = setInterval(() => setClockTick((t) => t + 1), 10_000);
+    const id = setInterval(() => setClockTick((tick) => tick + 1), 10_000);
     return () => clearInterval(id);
   }, [visible]);
   const fetchedAtLabel = useMemo(() => {
@@ -287,7 +288,7 @@ export function ProviderDiagnosticSheet({
         const result = await client.getProviderDiagnostic(provider);
         setDiagnostic(result.diagnostic);
       } catch (err) {
-        setDiagnostic(err instanceof Error ? err.message : "Failed to fetch diagnostic");
+        setDiagnostic(err instanceof Error ? err.message : t("Failed to fetch diagnostic"));
       } finally {
         setLoading(false);
       }
@@ -309,7 +310,7 @@ export function ProviderDiagnosticSheet({
       return;
     }
     void Promise.all([refresh([provider]), fetchDiagnostic()]).catch((err) => {
-      setDiagnostic(err instanceof Error ? err.message : "Failed to refresh provider");
+      setDiagnostic(err instanceof Error ? err.message : t("Failed to refresh provider"));
     });
   }, [fetchDiagnostic, provider, refresh]);
 
@@ -322,7 +323,9 @@ export function ProviderDiagnosticSheet({
         style={refreshButtonStyle}
         accessibilityRole="button"
         accessibilityLabel={
-          refreshInFlight ? `Refreshing ${providerLabel}` : `Refresh ${providerLabel}`
+          refreshInFlight
+            ? t("Refreshing {name}", { name: providerLabel })
+            : t("Refresh {name}", { name: providerLabel })
         }
       >
         {refreshInFlight ? (
@@ -362,7 +365,9 @@ export function ProviderDiagnosticSheet({
           <Text style={settingsStyles.sectionHeaderTitle}>·</Text>
         ) : null}
         {fetchedAtLabel ? (
-          <Text style={settingsStyles.sectionHeaderTitle}>Updated {fetchedAtLabel}</Text>
+          <Text style={settingsStyles.sectionHeaderTitle}>
+            {t("Updated {time}", { time: fetchedAtLabel })}
+          </Text>
         ) : null}
       </View>
     );
@@ -373,7 +378,7 @@ export function ProviderDiagnosticSheet({
       return (
         <View style={sheetStyles.emptyRow}>
           <ActivityIndicator size="small" color={theme.colors.foregroundMuted} />
-          <Text style={sheetStyles.mutedText}>Loading models…</Text>
+          <Text style={sheetStyles.mutedText}>{t("Loading models…")}</Text>
         </View>
       );
     }
@@ -388,7 +393,7 @@ export function ProviderDiagnosticSheet({
     if (models.length === 0) {
       return (
         <View style={sheetStyles.emptyRow}>
-          <Text style={sheetStyles.mutedText}>No models detected</Text>
+          <Text style={sheetStyles.mutedText}>{t("No models detected")}</Text>
         </View>
       );
     }
@@ -396,7 +401,7 @@ export function ProviderDiagnosticSheet({
       return (
         <View style={sheetStyles.emptyRow}>
           <Search size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
-          <Text style={sheetStyles.mutedText}>No models match your search</Text>
+          <Text style={sheetStyles.mutedText}>{t("No models match your search")}</Text>
         </View>
       );
     }
@@ -413,7 +418,7 @@ export function ProviderDiagnosticSheet({
       snapPoints={DIAGNOSTIC_SHEET_SNAP_POINTS}
       headerActions={headerActions}
     >
-      <SettingsSection title="Diagnostic">
+      <SettingsSection title={t("Diagnostic")}>
         <View style={settingsStyles.card}>
           <DiagnosticCodeBlock
             loading={loading}
@@ -427,7 +432,7 @@ export function ProviderDiagnosticSheet({
 
       <View>
         <View style={sheetStyles.modelsHeader}>
-          <Text style={settingsStyles.sectionHeaderTitle}>Models</Text>
+          <Text style={settingsStyles.sectionHeaderTitle}>{t("Models")}</Text>
           {modelsTrailing}
         </View>
         <View style={settingsStyles.card}>
@@ -436,7 +441,7 @@ export function ProviderDiagnosticSheet({
             <AdaptiveTextInput
               value={query}
               onChangeText={setQuery}
-              placeholder="Search models"
+              placeholder={t("Search models")}
               placeholderTextColor={theme.colors.foregroundMuted}
               autoCapitalize="none"
               autoCorrect={false}

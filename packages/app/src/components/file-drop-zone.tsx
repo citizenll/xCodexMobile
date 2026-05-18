@@ -6,6 +6,7 @@ import { Upload } from "lucide-react-native";
 import { useFileDropZone } from "@/hooks/use-file-drop-zone";
 import type { ImageAttachment } from "./message-input";
 import { isWeb } from "@/constants/platform";
+import { t } from "@/i18n";
 
 interface FileDropZoneProps {
   children: React.ReactNode;
@@ -58,7 +59,7 @@ export function FileDropZone({ children, onFilesDropped, disabled = false }: Fil
         {/* Content */}
         <View style={styles.overlayContent}>
           <Upload size={32} color={theme.colors.primary} />
-          <Text style={styles.overlayText}>Drop images here</Text>
+          <Text style={styles.overlayText}>{t("Drop images here")}</Text>
         </View>
       </Animated.View>
     </View>

@@ -65,6 +65,7 @@ import {
 import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
 import { SidebarCalloutSlot } from "./sidebar-callout-slot";
 import { SidebarWorkspaceList } from "./sidebar-workspace-list";
+import { t } from "@/i18n";
 
 const MIN_CHAT_WIDTH = 400;
 
@@ -396,7 +397,7 @@ function AddProjectTooltipContent({
 }) {
   return (
     <View style={styles.tooltipRow}>
-      <Text style={styles.tooltipText}>Add project</Text>
+      <Text style={styles.tooltipText}>{t("Add project")}</Text>
       {newAgentKeys ? <Shortcut chord={newAgentKeys} /> : null}
     </View>
   );
@@ -447,7 +448,7 @@ function SidebarFooter({
             <FooterIconButton
               onPress={handleOpenProject}
               testID="sidebar-add-project"
-              accessibilityLabel="Add project"
+              accessibilityLabel={t("Add project")}
               icon={FolderPlus}
               theme={theme}
             />
@@ -459,7 +460,7 @@ function SidebarFooter({
         <FooterIconButton
           onPress={handleSettings}
           testID="sidebar-settings"
-          accessibilityLabel="Settings"
+          accessibilityLabel={t("Settings")}
           icon={Settings}
           theme={theme}
         />
@@ -470,8 +471,8 @@ function SidebarFooter({
         onSelect={handleHostSelect}
         renderOption={renderHostOption}
         searchable={false}
-        title="Switch host"
-        searchPlaceholder="Search hosts..."
+        title={t("Switch host")}
+        searchPlaceholder={t("Search hosts...")}
         open={isHostPickerOpen}
         onOpenChange={setIsHostPickerOpen}
         anchorRef={hostTriggerRef}
@@ -674,7 +675,7 @@ function MobileSidebar({
           <View style={styles.sidebarContent} pointerEvents="auto">
             <SidebarHeaderRow
               icon={MessagesSquare}
-              label="Sessions"
+              label={t("Sessions")}
               onPress={handleViewMore}
               isActive={isSessionsActive}
               testID="sidebar-sessions"
@@ -815,7 +816,7 @@ function DesktopSidebar({
           {padding.top > 0 ? <View style={paddingTopSpacerStyle} /> : null}
           <SidebarHeaderRow
             icon={MessagesSquare}
-            label="Sessions"
+            label={t("Sessions")}
             onPress={handleViewMore}
             isActive={isSessionsActive}
             testID="sidebar-sessions"

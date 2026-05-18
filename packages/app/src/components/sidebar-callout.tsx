@@ -2,6 +2,7 @@ import { X } from "lucide-react-native";
 import { useCallback, useMemo, type ReactNode } from "react";
 import { Pressable, Text, View, type PressableStateCallbackType } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
+import { t } from "@/i18n";
 
 export type SidebarCalloutActionVariant = "primary" | "secondary";
 
@@ -69,7 +70,7 @@ export function SidebarCallout({
                 hitSlop={8}
                 style={styles.dismissButton}
                 testID={testID ? `${testID}-dismiss` : undefined}
-                accessibilityLabel="Dismiss"
+                accessibilityLabel={t("Dismiss")}
                 accessibilityRole="button"
               >
                 {({ hovered }) => (

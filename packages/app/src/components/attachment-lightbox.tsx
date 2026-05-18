@@ -7,6 +7,7 @@ import { X } from "lucide-react-native";
 import type { AttachmentMetadata } from "@/attachments/types";
 import { useAttachmentPreviewUrl } from "@/attachments/use-attachment-preview-url";
 import { isWeb } from "@/constants/platform";
+import { t } from "@/i18n";
 
 interface AttachmentLightboxProps {
   metadata: AttachmentMetadata | null;
@@ -63,14 +64,14 @@ export function AttachmentLightbox({ metadata, onClose }: AttachmentLightboxProp
         <Pressable
           testID="attachment-lightbox-backdrop"
           accessibilityRole="button"
-          accessibilityLabel="Dismiss image"
+          accessibilityLabel={t("Dismiss image")}
           onPress={onClose}
           style={styles.backdrop}
         />
         <View style={styles.contentLayer}>
           <View style={styles.imageArea}>
             {hasError ? (
-              <Text style={styles.errorText}>Couldn&apos;t load image</Text>
+              <Text style={styles.errorText}>{t("Couldn't load image")}</Text>
             ) : (
               <Pressable onPress={noopPress} style={styles.imagePressable}>
                 <ExpoImage
@@ -86,7 +87,7 @@ export function AttachmentLightbox({ metadata, onClose }: AttachmentLightboxProp
           <Pressable
             testID="attachment-lightbox-close"
             accessibilityRole="button"
-            accessibilityLabel="Close image"
+            accessibilityLabel={t("Close image")}
             hitSlop={8}
             onPress={onClose}
             style={closeButtonStyle}

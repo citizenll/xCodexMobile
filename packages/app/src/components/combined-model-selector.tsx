@@ -54,6 +54,7 @@ function backButtonStyle({ hovered, pressed }: PressableStateCallbackType & { ho
   ];
 }
 import { getProviderIcon } from "@/components/provider-icons";
+import { t } from "@/i18n";
 import {
   buildModelRows,
   buildSelectedTriggerLabel,
@@ -107,9 +108,9 @@ interface SelectorContentProps {
 
 function resolveDefaultModelLabel(models: AgentModelDefinition[] | undefined): string {
   if (!models || models.length === 0) {
-    return "Select model";
+    return t("Select model");
   }
-  return (models.find((model) => model.isDefault) ?? models[0])?.label ?? "Select model";
+  return (models.find((model) => model.isDefault) ?? models[0])?.label ?? t("Select model");
 }
 
 function normalizeSearchQuery(value: string): string {
@@ -215,7 +216,7 @@ function ModelRow({
           hitSlop={8}
           style={favoriteButtonStyle}
           accessibilityRole="button"
-          accessibilityLabel={isFavorite ? "Unfavorite model" : "Favorite model"}
+          accessibilityLabel={isFavorite ? t("Unfavorite model") : t("Favorite model")}
           testID={`favorite-model-${row.provider}-${row.modelId}`}
         >
           {({ hovered }) => {
@@ -323,7 +324,7 @@ function FavoritesSection({
   return (
     <View style={styles.favoritesContainer}>
       <View style={styles.sectionHeading}>
-        <Text style={styles.sectionHeadingText}>Favorites</Text>
+        <Text style={styles.sectionHeadingText}>{t("Favorites")}</Text>
       </View>
       {favoriteRows.map((row) => (
         <SelectableModelRow
@@ -365,7 +366,7 @@ function GroupProviderButton({
       <Text style={styles.drillDownText}>{providerLabel}</Text>
       <View style={styles.drillDownTrailing}>
         <Text style={styles.drillDownCount}>
-          {rowCount} {rowCount === 1 ? "model" : "models"}
+          {rowCount === 1 ? t("1 model") : t("{count} models", { count: rowCount })}
         </Text>
         <ChevronRight size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
       </View>
@@ -465,7 +466,7 @@ function ProviderSearchInput({
         ref={inputRef as unknown as Ref<never>}
         // @ts-expect-error - outlineStyle is web-only
         style={inputStyle}
-        placeholder="Search models..."
+        placeholder={t("Search models...")}
         placeholderTextColor={theme.colors.foregroundMuted}
         value={value}
         onChangeText={onChangeText}
@@ -563,7 +564,7 @@ function SelectorContent({
       {!hasResults ? (
         <View style={styles.emptyState}>
           <Search size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
-          <Text style={styles.emptyStateText}>No models match your search</Text>
+          <Text style={styles.emptyStateText}>{t("No models match your search")}</Text>
         </View>
       ) : null}
     </View>
@@ -667,13 +668,13 @@ export function CombinedModelSelector({
   const selectedModelLabel = useMemo(() => {
     if (!selectedModel) {
       if (!hasSelectedProvider) {
-        return "Select model";
+        return t("Select model");
       }
-      return isLoading ? "Loading..." : "Select model";
+      return isLoading ? t("Loading...") : t("Select model");
     }
     const models = allProviderModels.get(selectedProvider);
     if (!models) {
-      return isLoading ? "Loading..." : "Select model";
+      return isLoading ? t("Loading...") : t("Select model");
     }
     const model = models.find((entry) => entry.id === selectedModel);
     return model?.label ?? resolveDefaultModelLabel(models);
@@ -689,7 +690,7 @@ export function CombinedModelSelector({
   }, [allProviderModels, view]);
 
   const triggerLabel = useMemo(() => {
-    if (selectedModelLabel === "Loading..." || selectedModelLabel === "Select model") {
+    if (selectedModelLabel === t("Loading...") || selectedModelLabel === t("Select model")) {
       return selectedModelLabel;
     }
 
@@ -767,7 +768,7 @@ export function CombinedModelSelector({
         onPress={handleTriggerPress}
         style={triggerStyle}
         accessibilityRole="button"
-        accessibilityLabel={`Select model (${selectedModelLabel})`}
+        accessibilityLabel={t("Select model") + ` (${selectedModelLabel})`}
         testID="combined-model-selector"
       >
         {renderTrigger ? (
@@ -799,7 +800,7 @@ export function CombinedModelSelector({
         desktopPlacement="top-start"
         desktopMinWidth={360}
         desktopFixedHeight={desktopFixedHeight}
-        title="Select model"
+        title={t("Select model")}
         stickyHeader={stickyHeader}
       >
         {isContentReady ? (
@@ -820,7 +821,7 @@ export function CombinedModelSelector({
         ) : (
           <View style={styles.sheetLoadingState}>
             <ActivityIndicator size="small" color={theme.colors.foregroundMuted} />
-            <Text style={styles.sheetLoadingText}>Loading model selector…</Text>
+            <Text style={styles.sheetLoadingText}>{t("Loading model selector…")}</Text>
           </View>
         )}
       </Combobox>

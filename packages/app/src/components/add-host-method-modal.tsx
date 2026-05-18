@@ -4,6 +4,7 @@ import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { QrCode, Link2, ClipboardPaste, Search } from "lucide-react-native";
 import { AdaptiveModalSheet } from "./adaptive-modal-sheet";
 import { isNative } from "@/constants/platform";
+import { t } from "@/i18n";
 
 const styles = StyleSheet.create((theme) => ({
   option: {
@@ -68,7 +69,7 @@ export function AddHostMethodModal({
 
   return (
     <AdaptiveModalSheet
-      title="Add connection"
+      title={t("Add connection")}
       visible={visible}
       onClose={onClose}
       testID="add-host-method-modal"
@@ -78,13 +79,15 @@ export function AddHostMethodModal({
           style={styles.option}
           onPress={handleLanDiscovery}
           accessibilityRole="button"
-          accessibilityLabel="Find on LAN"
+          accessibilityLabel={t("Find on LAN")}
           testID="add-host-method-lan-discovery"
         >
           <Search size={18} color={theme.colors.foreground} />
           <View style={styles.optionBody}>
-            <Text style={styles.optionText}>Find on LAN</Text>
-            <Text style={styles.optionSubtext}>Automatically discover xCodex on this network.</Text>
+            <Text style={styles.optionText}>{t("Find on LAN")}</Text>
+            <Text style={styles.optionSubtext}>
+              {t("Automatically discover xCodex on this network.")}
+            </Text>
           </View>
         </Pressable>
       ) : null}
@@ -93,13 +96,13 @@ export function AddHostMethodModal({
         style={styles.option}
         onPress={handleDirect}
         accessibilityRole="button"
-        accessibilityLabel="Direct connection"
+        accessibilityLabel={t("Direct connection")}
         testID="add-host-method-direct"
       >
         <Link2 size={18} color={theme.colors.foreground} />
         <View style={styles.optionBody}>
-          <Text style={styles.optionText}>Direct connection</Text>
-          <Text style={styles.optionSubtext}>Local network or VPN.</Text>
+          <Text style={styles.optionText}>{t("Direct connection")}</Text>
+          <Text style={styles.optionSubtext}>{t("Local network or VPN.")}</Text>
         </View>
       </Pressable>
 
@@ -108,12 +111,12 @@ export function AddHostMethodModal({
           style={styles.option}
           onPress={handleScan}
           accessibilityRole="button"
-          accessibilityLabel="Scan QR code"
+          accessibilityLabel={t("Scan QR code")}
         >
           <QrCode size={18} color={theme.colors.foreground} />
           <View style={styles.optionBody}>
-            <Text style={styles.optionText}>Scan QR code</Text>
-            <Text style={styles.optionSubtext}>Encrypted relay connection.</Text>
+            <Text style={styles.optionText}>{t("Scan QR code")}</Text>
+            <Text style={styles.optionSubtext}>{t("Encrypted relay connection.")}</Text>
           </View>
         </Pressable>
       ) : null}
@@ -122,13 +125,13 @@ export function AddHostMethodModal({
         style={styles.option}
         onPress={handlePaste}
         accessibilityRole="button"
-        accessibilityLabel="Paste pairing link"
+        accessibilityLabel={t("Paste pairing link")}
         testID="add-host-method-pair-link"
       >
         <ClipboardPaste size={18} color={theme.colors.foreground} />
         <View style={styles.optionBody}>
-          <Text style={styles.optionText}>Paste pairing link</Text>
-          <Text style={styles.optionSubtext}>Encrypted relay connection.</Text>
+          <Text style={styles.optionText}>{t("Paste pairing link")}</Text>
+          <Text style={styles.optionSubtext}>{t("Encrypted relay connection.")}</Text>
         </View>
       </Pressable>
     </AdaptiveModalSheet>

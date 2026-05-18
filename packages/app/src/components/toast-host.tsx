@@ -7,6 +7,7 @@ import { useIsCompactFormFactor } from "@/constants/layout";
 import { isWeb } from "@/constants/platform";
 import { AlertTriangle, CheckCircle2 } from "lucide-react-native";
 import { getOverlayRoot, OVERLAY_Z } from "@/lib/overlay-root";
+import { t } from "@/i18n";
 import {
   HEADER_INNER_HEIGHT,
   HEADER_INNER_HEIGHT_MOBILE,
@@ -85,7 +86,7 @@ export function useToastHost(): {
     () => ({
       show,
       copied: (label?: string) =>
-        show(label ? `Copied ${label}` : "Copied", {
+        show(label ? t("Copied {label}", { label }) : t("Copied"), {
           variant: "success",
           icon: <CheckCircle2 size={18} color={theme.colors.foreground} />,
         }),

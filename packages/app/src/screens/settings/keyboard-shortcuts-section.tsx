@@ -22,6 +22,7 @@ import { useKeyboardShortcutsStore } from "@/stores/keyboard-shortcuts-store";
 import { getShortcutOs } from "@/utils/shortcut-platform";
 import { getIsElectronRuntime } from "@/constants/layout";
 import { isNative } from "@/constants/platform";
+import { t, translateText } from "@/i18n";
 
 const EMPTY_CAPTURED_COMBOS: string[] = [];
 
@@ -41,7 +42,7 @@ function ShortcutSequence({
   }, [chord, heldModifiers]);
 
   if ((!chord || chord.length === 0) && !heldModifiers) {
-    return <Text style={styles.capturingText}>Press shortcut...</Text>;
+    return <Text style={styles.capturingText}>{t("Press shortcut...")}</Text>;
   }
 
   return <Shortcut chord={displayChord} />;
@@ -127,7 +128,7 @@ function ShortcutRow({
 
   return (
     <View style={rowStyle}>
-      <Text style={styles.rowLabel}>{row.label}</Text>
+      <Text style={styles.rowLabel}>{translateText(row.label)}</Text>
       <View style={styles.rowActions}>
         {isCapturing ? (
           <ShortcutSequence chord={capturedCombos} heldModifiers={heldModifiers} />
@@ -138,17 +139,17 @@ function ShortcutRow({
           <>
             {isCapturing && capturedCombos.length > 0 ? (
               <Button variant="ghost" size="sm" onPress={onDone}>
-                Done
+                {t("Done")}
               </Button>
             ) : null}
             <Button variant="ghost" size="sm" onPress={isCapturing ? onCancel : onRebind}>
-              {isCapturing ? "Cancel" : "Rebind"}
+              {isCapturing ? t("Cancel") : t("Rebind")}
             </Button>
           </>
         )}
         {overrideCombo !== undefined && !isCapturing && (
           <Button variant="ghost" size="sm" onPress={onReset}>
-            <Text style={styles.resetText}>Reset</Text>
+            <Text style={styles.resetText}>{t("Reset")}</Text>
           </Button>
         )}
       </View>
@@ -244,9 +245,11 @@ export function KeyboardShortcutsSection() {
 
   if (isNative) {
     return (
-      <SettingsSection title="Shortcuts">
+      <SettingsSection title={t("Shortcuts")}>
         <View style={mobileCardStyle}>
-          <Text style={styles.mobileText}>Keyboard shortcuts are only available on desktop</Text>
+          <Text style={styles.mobileText}>
+            {t("Keyboard shortcuts are only available on desktop")}
+          </Text>
         </View>
       </SettingsSection>
     );
@@ -254,7 +257,7 @@ export function KeyboardShortcutsSection() {
 
   const resetAllButton = hasOverrides ? (
     <Button variant="ghost" size="sm" onPress={handleResetAll}>
-      Reset all
+      {t("Reset all")}
     </Button>
   ) : undefined;
 
@@ -264,7 +267,7 @@ export function KeyboardShortcutsSection() {
         return (
           <SettingsSection
             key={section.id}
-            title={section.title}
+            title={translateText(section.title)}
             trailing={sectionIndex === 0 ? resetAllButton : undefined}
           >
             <View style={settingsStyles.card}>

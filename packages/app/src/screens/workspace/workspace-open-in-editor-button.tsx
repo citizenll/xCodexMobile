@@ -29,6 +29,7 @@ import { isAbsolutePath } from "@/utils/path";
 import { isWeb } from "@/constants/platform";
 import type { Theme } from "@/styles/theme";
 import { filterTargetsForDaemonLocation } from "./workspace-open-targets";
+import { t } from "@/i18n";
 
 interface WorkspaceOpenInEditorButtonProps {
   serverId: string;
@@ -236,7 +237,7 @@ export function WorkspaceOpenInEditorButton({
           onPress={handlePrimaryPress}
           disabled={openMutation.isPending}
           accessibilityRole="button"
-          accessibilityLabel={`Open workspace in ${primaryOption.label}`}
+          accessibilityLabel={t("Open workspace in {name}", { name: primaryOption.label })}
         >
           {openMutation.isPending ? (
             <ThemedActivityIndicator
@@ -247,7 +248,7 @@ export function WorkspaceOpenInEditorButton({
           ) : (
             <View style={styles.splitButtonContent}>
               {primaryOption.icon}
-              {!hideLabels && <Text style={styles.splitButtonText}>Open</Text>}
+              {!hideLabels && <Text style={styles.splitButtonText}>{t("Open")}</Text>}
             </View>
           )}
         </Pressable>
@@ -257,7 +258,7 @@ export function WorkspaceOpenInEditorButton({
               testID="workspace-open-in-editor-caret"
               style={caretTriggerStyle}
               accessibilityRole="button"
-              accessibilityLabel="Choose editor"
+              accessibilityLabel={t("Choose editor")}
             >
               <ThemedChevronDown size={16} uniProps={mutedColorMapping} />
             </DropdownMenuTrigger>

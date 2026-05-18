@@ -62,12 +62,12 @@ import { getModeVisuals, type AgentModeColorTier } from "@server/server/agent/pr
 import {
   getFeatureHighlightColor,
   getFeatureTooltip,
-  getStatusSelectorHint,
   resolveAgentModelSelection,
 } from "@/components/agent-status-bar.utils";
 import { isWeb as platformIsWeb } from "@/constants/platform";
 import { useToast } from "@/contexts/toast-context";
 import { toErrorMessage } from "@/utils/error-messages";
+import { t } from "@/i18n";
 
 interface StatusOption {
   id: string;
@@ -952,7 +952,7 @@ function DesktopStatusBarContent(props: DesktopStatusBarContentProps) {
             onPress={handleProviderPress}
             style={providerPressableStyle}
             accessibilityRole="button"
-            accessibilityLabel="Select agent provider"
+            accessibilityLabel={t("Select agent provider")}
             testID="agent-provider-selector"
           >
             <Text style={styles.modeBadgeText}>{displayProvider}</Text>
@@ -997,7 +997,7 @@ function DesktopStatusBarContent(props: DesktopStatusBarContentProps) {
             </View>
           </TooltipTrigger>
           <TooltipContent side="top" align="center" offset={8}>
-            <Text style={styles.tooltipText}>{getStatusSelectorHint("model")}</Text>
+            <Text style={styles.tooltipText}>{t("Change model")}</Text>
           </TooltipContent>
         </Tooltip>
       ) : null}
@@ -1013,7 +1013,9 @@ function DesktopStatusBarContent(props: DesktopStatusBarContentProps) {
                 onPress={handleThinkingPress}
                 style={thinkingPressableStyle}
                 accessibilityRole="button"
-                accessibilityLabel={`Select thinking option (${displayThinking})`}
+                accessibilityLabel={t("Select thinking option ({name})", {
+                  name: displayThinking,
+                })}
                 testID="agent-thinking-selector"
               >
                 <Brain size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
@@ -1022,7 +1024,7 @@ function DesktopStatusBarContent(props: DesktopStatusBarContentProps) {
               </Pressable>
             </TooltipTrigger>
             <TooltipContent side="top" align="center" offset={8}>
-              <Text style={styles.tooltipText}>{getStatusSelectorHint("thinking")}</Text>
+              <Text style={styles.tooltipText}>{t("Thinking mode")}</Text>
             </TooltipContent>
           </Tooltip>
           <Combobox
@@ -1049,7 +1051,9 @@ function DesktopStatusBarContent(props: DesktopStatusBarContentProps) {
                 onPress={handleModePress}
                 style={modePressableStyle}
                 accessibilityRole="button"
-                accessibilityLabel={`Select agent mode (${selectedModeId ?? ""})`}
+                accessibilityLabel={t("Select agent mode ({name})", {
+                  name: selectedModeId ?? "",
+                })}
                 testID="agent-mode-selector"
               >
                 {ModeIconComponent ? (
@@ -1060,7 +1064,7 @@ function DesktopStatusBarContent(props: DesktopStatusBarContentProps) {
               </Pressable>
             </TooltipTrigger>
             <TooltipContent side="top" align="center" offset={8}>
-              <Text style={styles.tooltipText}>{getStatusSelectorHint("mode")}</Text>
+              <Text style={styles.tooltipText}>{t("Change permission mode")}</Text>
             </TooltipContent>
           </Tooltip>
           <Combobox
@@ -1189,7 +1193,7 @@ function SheetStatusBarContent(props: SheetStatusBarContentProps) {
         onPress={handleOpenPrefs}
         style={prefsButtonStyle}
         accessibilityRole="button"
-        accessibilityLabel="Agent preferences"
+        accessibilityLabel={t("Agent preferences")}
         testID="agent-preferences-button"
       >
         {ProviderIcon ? (
@@ -1201,7 +1205,7 @@ function SheetStatusBarContent(props: SheetStatusBarContentProps) {
       </Pressable>
 
       <AdaptiveModalSheet
-        title="Preferences"
+        title={t("Preferences")}
         visible={prefsOpen}
         onClose={handleClosePrefs}
         testID="agent-preferences-sheet"
@@ -1236,7 +1240,7 @@ function SheetStatusBarContent(props: SheetStatusBarContentProps) {
                 disabled={disabled || !canSelectThinking}
                 style={sheetThinkingPressableStyle}
                 accessibilityRole="button"
-                accessibilityLabel="Select thinking option"
+                accessibilityLabel={t("Select thinking option")}
                 testID="agent-preferences-thinking"
               >
                 <Brain size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
@@ -1264,7 +1268,7 @@ function SheetStatusBarContent(props: SheetStatusBarContentProps) {
                 disabled={disabled || !canSelectMode}
                 style={sheetModePressableStyle}
                 accessibilityRole="button"
-                accessibilityLabel="Select agent mode"
+                accessibilityLabel={t("Select agent mode")}
                 testID="agent-preferences-mode"
               >
                 {ModeIconComponent ? (

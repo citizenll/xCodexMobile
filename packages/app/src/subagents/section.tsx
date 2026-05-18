@@ -13,6 +13,7 @@ import {
 import type { Theme } from "@/styles/theme";
 import { deriveSidebarStateBucket } from "@/utils/sidebar-agent-state";
 import type { SubagentRow } from "./select";
+import { t } from "@/i18n";
 
 const ThemedArchive = withUnistyles(Archive);
 const ThemedChevronDown = withUnistyles(ChevronDown);
@@ -39,9 +40,11 @@ function formatHeaderLabel(rows: SubagentRow[]): string {
     }
   }
 
-  const parts = [`${rows.length} ${rows.length === 1 ? "subagent" : "subagents"}`];
+  const parts = [
+    rows.length === 1 ? t("1 subagent") : t("{count} subagents", { count: rows.length }),
+  ];
   if (runningCount > 0) {
-    parts.push(`${runningCount} running`);
+    parts.push(t("{count} running", { count: runningCount }));
   }
   return parts.join(" · ");
 }
@@ -226,7 +229,7 @@ function SubagentArchiveButton({
         <TooltipTrigger asChild disabled={!visible}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Archive ${displayLabel}`}
+            accessibilityLabel={t("Archive {name}", { name: displayLabel })}
             testID={`subagents-section-archive-${rowId}`}
             onPress={onPress}
             style={styles.archiveButton}
@@ -241,7 +244,7 @@ function SubagentArchiveButton({
           </Pressable>
         </TooltipTrigger>
         <TooltipContent side="top" align="center" offset={8}>
-          <Text style={styles.tooltipText}>Archive subagent</Text>
+          <Text style={styles.tooltipText}>{t("Archive subagent")}</Text>
         </TooltipContent>
       </Tooltip>
     </View>
