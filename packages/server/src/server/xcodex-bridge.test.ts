@@ -564,7 +564,13 @@ test("uses the create-agent timeout budget for UI-mediated xCodex thread creatio
       id: "xcodex:workspace-1:thread-delayed",
       model: "model-1",
     });
-    expect(requests).toContainEqual(
+    const createRequest = requests.find(
+      (request) =>
+        typeof request === "object" &&
+        request !== null &&
+        (request as { kind?: unknown }).kind === "thread.create",
+    ) as { payload?: Record<string, unknown> } | undefined;
+    expect(createRequest).toEqual(
       expect.objectContaining({
         kind: "thread.create",
         payload: expect.objectContaining({
@@ -572,11 +578,56 @@ test("uses the create-agent timeout budget for UI-mediated xCodex thread creatio
           providerId: "provider-1",
           supplierId: "supplier-1",
           modelId: "model-1",
-          text: "hello",
-          messageId: "message-1",
         }),
       }),
     );
+    expect(createRequest?.payload).not.toHaveProperty("text");
+    expect(createRequest?.payload).not.toHaveProperty("messageId");
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("rejects when xCodex host bridge closes before a v2 response", async () => {
+  const server = createServer((socket) => {
+    socket.on("data", () => {
+      socket.end();
+    });
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("missing test server address");
+    const dir = await mkdtemp(path.join(tmpdir(), "xcodex-bridge-test-"));
+    tempDirs.push(dir);
+    const infoFile = path.join(dir, "xcodex-host-bridge.json");
+    await writeFile(
+      infoFile,
+      JSON.stringify({ protocolVersion: 2, port: address.port, token: "secret" }),
+      "utf8",
+    );
+
+    const bridge = createXcodexBridgeClient({
+      logger: createLogger(),
+      infoFile,
+      timeouts: {
+        v2MessageSendRequestMs: 5_000,
+      },
+    });
+
+    await expect(
+      Promise.race([
+        bridge.sendMessage({
+          agentId: "xcodex:workspace-1:thread-1",
+          text: "from mobile",
+          messageId: "message-1",
+        }),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("test timed out waiting for close rejection")), 500),
+        ),
+      ]),
+    ).rejects.toThrow("connection closed before response");
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

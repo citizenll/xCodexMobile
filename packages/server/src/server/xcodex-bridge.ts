@@ -959,10 +959,18 @@ export function createXcodexBridgeClient(options: {
     const { info } = await readInfo();
     return await new Promise<unknown>((resolve, reject) => {
       const client = createConnection({ host: "127.0.0.1", port: info.port });
+      let completed = false;
+      const finish = (fn: () => void) => {
+        if (completed) return;
+        completed = true;
+        fn();
+      };
       const timeout = setTimeout(
         () => {
-          client.destroy();
-          reject(new Error("xCodex host bridge request timed out"));
+          finish(() => {
+            client.destroy();
+            reject(new Error("xCodex host bridge request timed out"));
+          });
         },
         positiveTimeoutMs(timeouts?.v1RequestMs, HOST_BRIDGE_V1_REQUEST_TIMEOUT_MS),
       );
@@ -980,20 +988,23 @@ export function createXcodexBridgeClient(options: {
         try {
           const parsed = HostBridgeResponseSchema.parse(JSON.parse(buffer.slice(0, newline)));
           if (!parsed.ok) {
-            reject(new Error(parsed.error ?? "xCodex host bridge request failed"));
+            finish(() => reject(new Error(parsed.error ?? "xCodex host bridge request failed")));
             return;
           }
-          resolve(parsed.data);
+          finish(() => resolve(parsed.data));
         } catch (error) {
-          reject(error);
+          finish(() => reject(error));
         }
       });
       client.on("error", (error) => {
         clearTimeout(timeout);
-        reject(error);
+        finish(() => reject(error));
       });
       client.on("close", () => {
         clearTimeout(timeout);
+        finish(() =>
+          reject(new Error(`xCodex host bridge connection closed before response for ${kind}`)),
+        );
       });
     });
   }
@@ -1009,13 +1020,25 @@ export function createXcodexBridgeClient(options: {
     return await new Promise<unknown>((resolve, reject) => {
       const client = createConnection({ host: "127.0.0.1", port: info.port });
       const timeoutMs = hostBridgeV2RequestTimeoutMs(kind, timeouts);
+      const startedAt = Date.now();
+      const id = randomUUID();
+      let completed = false;
+      const finish = (level: "info" | "warn", msg: string, extra: Record<string, unknown> = {}) => {
+        if (completed) return;
+        completed = true;
+        logger[level](
+          { kind, requestId: id, timeoutMs, elapsedMs: Date.now() - startedAt, ...extra },
+          msg,
+        );
+      };
+      logger.info({ kind, requestId: id, timeoutMs }, "xcodex_host_bridge_v2_request_start");
       const timeout = setTimeout(() => {
+        finish("warn", "xcodex_host_bridge_v2_request_timeout");
         client.destroy();
         reject(new Error(`xCodex host bridge v2 request timed out for ${kind}`));
       }, timeoutMs);
       timeout.unref?.();
       let buffer = "";
-      const id = randomUUID();
       client.setEncoding("utf8");
       client.on("connect", () => {
         client.write(
@@ -1036,24 +1059,46 @@ export function createXcodexBridgeClient(options: {
         try {
           const parsed = HostBridgeV2ResponseSchema.parse(JSON.parse(buffer.slice(0, newline)));
           if (parsed.id && parsed.id !== id) {
+            finish("warn", "xcodex_host_bridge_v2_response_id_mismatch", {
+              responseId: parsed.id,
+            });
             reject(new Error("xCodex host bridge v2 response id mismatch"));
             return;
           }
           if (!parsed.ok) {
+            const errorCode =
+              parsed.error && typeof parsed.error === "object" ? parsed.error.code : undefined;
+            let errorMessage: string | undefined;
+            if (typeof parsed.error === "string") {
+              errorMessage = parsed.error;
+            } else if (parsed.error && typeof parsed.error === "object") {
+              errorMessage = parsed.error.message;
+            }
+            finish("warn", "xcodex_host_bridge_v2_request_error", {
+              code: errorCode,
+              error: errorMessage,
+            });
             reject(new Error(v2ErrorMessage(parsed.error)));
             return;
           }
+          finish("info", "xcodex_host_bridge_v2_request_ok");
           resolve(parsed.data);
         } catch (error) {
+          finish("warn", "xcodex_host_bridge_v2_response_parse_failed", { err: error });
           reject(error);
         }
       });
       client.on("error", (error) => {
         clearTimeout(timeout);
+        finish("warn", "xcodex_host_bridge_v2_socket_error", { err: error });
         reject(error);
       });
       client.on("close", () => {
         clearTimeout(timeout);
+        if (!completed) {
+          finish("warn", "xcodex_host_bridge_v2_socket_closed_without_response");
+          reject(new Error(`xCodex host bridge v2 connection closed before response for ${kind}`));
+        }
       });
     });
   }
@@ -1280,14 +1325,7 @@ export function createXcodexBridgeClient(options: {
         })
         .parse(data);
     },
-    async createAgent({
-      workspaceId,
-      config,
-      initialPrompt,
-      clientMessageId,
-      images,
-      attachments,
-    }) {
+    async createAgent({ workspaceId, config }) {
       if (config.provider !== XCODEX_AGENT_PROVIDER) {
         throw new Error(`Not an xCodex provider: ${config.provider}`);
       }
@@ -1299,21 +1337,12 @@ export function createXcodexBridgeClient(options: {
       if (!route) {
         throw new Error("xCodex runtime catalog has no selectable models");
       }
-      const text = initialPrompt ?? "";
-      const inputItems = await buildXcodexMobileInputItems({
-        text,
-        images,
-        attachments,
-      });
       const data = await requestV2("thread.create", {
         ...(workspaceId ? { workspaceId } : {}),
         providerId: route.providerId,
         supplierId: route.supplierId,
         modelId: route.modelId,
         ...(route.realProviderOverride ? { realProviderOverride: route.realProviderOverride } : {}),
-        text,
-        ...(clientMessageId ? { messageId: clientMessageId } : {}),
-        ...(inputItems ? { inputItems } : {}),
       });
       const parsed = HostBridgeThreadCreateResponseSchema.parse(data);
       if (!parsed.accepted) {

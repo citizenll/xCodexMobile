@@ -982,13 +982,45 @@ class ClientSession {
     }
   }
 
-  private sendEnvelope(message: Record<string, unknown>) {
-    if (this.socket.readyState !== WebSocket.OPEN) return;
+  private sendEnvelope(message: Record<string, unknown>): boolean {
+    if (this.socket.readyState !== WebSocket.OPEN) return false;
     this.socket.send(JSON.stringify(message));
+    return true;
   }
 
   private sendSession(message: Record<string, unknown>) {
-    this.sendEnvelope({ type: "session", message });
+    const payload = isRecord(message.payload) ? message.payload : null;
+    let requestId: string | undefined;
+    if (typeof payload?.requestId === "string") {
+      requestId = payload.requestId;
+    } else if (typeof message.requestId === "string") {
+      requestId = message.requestId;
+    }
+    const type = typeof message.type === "string" ? message.type : undefined;
+    const status = typeof payload?.status === "string" ? payload.status : undefined;
+    const terminalResponse =
+      type === "send_agent_message_response" ||
+      status === "agent_created" ||
+      status === "agent_create_failed";
+    const sent = this.sendEnvelope({ type: "session", message });
+    if (terminalResponse) {
+      const logFields = {
+        type,
+        status,
+        requestId,
+        agentId: typeof payload?.agentId === "string" ? payload.agentId : undefined,
+        accepted: typeof payload?.accepted === "boolean" ? payload.accepted : undefined,
+        error: typeof payload?.error === "string" ? payload.error : undefined,
+      };
+      if (sent) {
+        this.logger.info(logFields, "session_terminal_response_send");
+      } else {
+        this.logger.warn(
+          { ...logFields, readyState: this.socket.readyState },
+          "session_terminal_response_dropped",
+        );
+      }
+    }
   }
 
   private trackAgentInterest(agentId: string) {
@@ -1343,6 +1375,18 @@ class ClientSession {
 
   private async handleSendMessage(request: SendMessageRequest) {
     this.trackAgentInterest(request.agentId);
+    const startedAt = Date.now();
+    this.logger.info(
+      {
+        requestId: request.requestId,
+        agentId: request.agentId,
+        messageId: request.messageId,
+        textLen: request.text.length,
+        images: request.images?.length ?? 0,
+        attachments: request.attachments?.length ?? 0,
+      },
+      "send_agent_message_request_start",
+    );
     try {
       const result = await this.bridge.sendMessage({
         agentId: request.agentId,
@@ -1351,6 +1395,15 @@ class ClientSession {
         images: request.images,
         attachments: request.attachments,
       });
+      this.logger.info(
+        {
+          requestId: request.requestId,
+          agentId: request.agentId,
+          accepted: result.accepted,
+          elapsedMs: Date.now() - startedAt,
+        },
+        "send_agent_message_bridge_result",
+      );
       this.sendSession({
         type: "send_agent_message_response",
         payload: {
@@ -1361,6 +1414,15 @@ class ClientSession {
         },
       });
     } catch (error) {
+      this.logger.warn(
+        {
+          err: error,
+          requestId: request.requestId,
+          agentId: request.agentId,
+          elapsedMs: Date.now() - startedAt,
+        },
+        "send_agent_message_bridge_failed",
+      );
       this.sendSession({
         type: "send_agent_message_response",
         payload: {
@@ -1374,6 +1436,19 @@ class ClientSession {
   }
 
   private async handleCreateAgent(request: CreateAgentRequest) {
+    const startedAt = Date.now();
+    this.logger.info(
+      {
+        requestId: request.requestId,
+        workspaceId: request.workspaceId,
+        provider: request.config.provider,
+        model: request.config.model,
+        initialPromptLen: request.initialPrompt?.length ?? 0,
+        images: request.images?.length ?? 0,
+        attachments: request.attachments?.length ?? 0,
+      },
+      "create_agent_request_start",
+    );
     try {
       const agent = (await this.bridge.createAgent({
         workspaceId: request.workspaceId,
@@ -1383,6 +1458,15 @@ class ClientSession {
         images: request.images,
         attachments: request.attachments,
       })) as AgentSnapshot;
+      this.logger.info(
+        {
+          requestId: request.requestId,
+          agentId: agent.id,
+          elapsedMs: Date.now() - startedAt,
+        },
+        "create_agent_bridge_result",
+      );
+      this.trackAgentInterest(agent.id);
       this.sendSession({
         type: "status",
         payload: {
@@ -1392,13 +1476,48 @@ class ClientSession {
           agent,
         },
       });
-      this.trackAgentInterest(agent.id);
       this.sendAgentUpsert(agent);
       const workspaceId = agent.labels["xcodex.workspaceId"];
       if (workspaceId) {
         void this.forwardWorkspaceUpdate(workspaceId);
       }
+      const hasInitialMessage =
+        Boolean(request.initialPrompt?.trim()) ||
+        (request.images?.length ?? 0) > 0 ||
+        (request.attachments?.length ?? 0) > 0;
+      if (hasInitialMessage) {
+        void this.bridge
+          .sendMessage({
+            agentId: agent.id,
+            text: request.initialPrompt ?? "",
+            messageId: request.clientMessageId,
+            images: request.images,
+            attachments: request.attachments,
+          })
+          .then((result) => {
+            this.logger.info(
+              {
+                requestId: request.requestId,
+                agentId: agent.id,
+                accepted: result.accepted,
+                elapsedMs: Date.now() - startedAt,
+              },
+              "create_agent_initial_message_queued",
+            );
+            return undefined;
+          })
+          .catch((error) => {
+            this.logger.warn(
+              { err: error, requestId: request.requestId, agentId: agent.id },
+              "create_agent_initial_message_failed",
+            );
+          });
+      }
     } catch (error) {
+      this.logger.warn(
+        { err: error, requestId: request.requestId, elapsedMs: Date.now() - startedAt },
+        "create_agent_bridge_failed",
+      );
       this.sendSession({
         type: "status",
         payload: {
