@@ -319,6 +319,35 @@ test("default mapper forwards xCodex user ingress without enabling realtime stre
   });
 });
 
+test("mobile ingress without a stable source message id is not converted to a second user row", () => {
+  const mapper = createXcodexStreamEventMapper();
+
+  expect(
+    mapper.fromAppServer(
+      appServerEvent("x-codex/mobile/ingress", {
+        text: "sent from mobile",
+        ingressId: "random-bridge-id",
+      }),
+    ),
+  ).toBeNull();
+
+  const desktopIngress = expectValidStreamEvent(
+    mapper.fromAppServer(
+      appServerEvent("x-codex/desktop/ingress", {
+        text: "sent from desktop",
+        ingressId: "desktop-random-bridge-id",
+      }),
+    ),
+  );
+
+  expect(desktopIngress).toMatchObject({
+    item: {
+      type: "user_message",
+      messageId: "desktop-random-bridge-id",
+    },
+  });
+});
+
 test("identifies turn lifecycle events for non-realtime subscription updates", () => {
   expect(isXcodexTurnLifecycleAppServerEvent(appServerEvent("turn/started", {}))).toBe(true);
   expect(

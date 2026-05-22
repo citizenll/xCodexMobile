@@ -224,6 +224,7 @@ function appendUserMessage(
       ? state[existingIndex]
       : null;
   const preservedImages = existing?.images;
+  const preservedAttachments = existing?.attachments;
 
   const nextItem: UserMessageItem = {
     kind: "user_message",
@@ -231,6 +232,9 @@ function appendUserMessage(
     text: chunk,
     timestamp,
     ...(preservedImages && preservedImages.length > 0 ? { images: preservedImages } : {}),
+    ...(preservedAttachments && preservedAttachments.length > 0
+      ? { attachments: preservedAttachments }
+      : {}),
   };
 
   if (existingIndex >= 0) {

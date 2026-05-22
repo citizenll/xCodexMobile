@@ -1325,7 +1325,14 @@ export function createXcodexBridgeClient(options: {
         })
         .parse(data);
     },
-    async createAgent({ workspaceId, config }) {
+    async createAgent({
+      workspaceId,
+      config,
+      initialPrompt,
+      clientMessageId,
+      images,
+      attachments,
+    }) {
       if (config.provider !== XCODEX_AGENT_PROVIDER) {
         throw new Error(`Not an xCodex provider: ${config.provider}`);
       }
@@ -1337,12 +1344,25 @@ export function createXcodexBridgeClient(options: {
       if (!route) {
         throw new Error("xCodex runtime catalog has no selectable models");
       }
+      const text = initialPrompt?.trim() ?? "";
+      const resolvedInputItems = await buildXcodexMobileInputItems({
+        text,
+        images,
+        attachments,
+      });
+      const hasInitialMessage = text.length > 0 || (resolvedInputItems?.length ?? 0) > 0;
+      if (!hasInitialMessage) {
+        throw new Error("xCodex thread creation requires an initial message");
+      }
       const data = await requestV2("thread.create", {
         ...(workspaceId ? { workspaceId } : {}),
         providerId: route.providerId,
         supplierId: route.supplierId,
         modelId: route.modelId,
         ...(route.realProviderOverride ? { realProviderOverride: route.realProviderOverride } : {}),
+        text,
+        ...(clientMessageId ? { messageId: clientMessageId } : {}),
+        ...(resolvedInputItems ? { inputItems: resolvedInputItems } : {}),
       });
       const parsed = HostBridgeThreadCreateResponseSchema.parse(data);
       if (!parsed.accepted) {

@@ -1344,6 +1344,51 @@ export class Session {
     return new Date(emittedAtMs).toISOString();
   }
 
+  private xcodexIngressMessageId(
+    method: string,
+    params: Record<string, unknown> | null,
+  ): string | null {
+    if (method === "x-codex/mobile/ingress") {
+      return this.stringField(params, [
+        "sourceMessageId",
+        "source_message_id",
+        "messageId",
+        "message_id",
+      ]);
+    }
+    return this.stringField(params, [
+      "sourceMessageId",
+      "source_message_id",
+      "messageId",
+      "message_id",
+      "ingressId",
+      "ingress_id",
+    ]);
+  }
+
+  private xcodexIngressStreamEvent(
+    method: string,
+    params: Record<string, unknown> | null,
+  ): AgentStreamEventPayload | null {
+    const text = this.stringField(params, ["text", "content", "message"]);
+    if (text === null) {
+      return null;
+    }
+    const messageId = this.xcodexIngressMessageId(method, params);
+    if (method === "x-codex/mobile/ingress" && !messageId) {
+      return null;
+    }
+    return {
+      type: "timeline",
+      provider: "xcodex",
+      item: {
+        type: "user_message",
+        text,
+        ...(messageId ? { messageId } : {}),
+      },
+    };
+  }
+
   private xcodexStreamEventFromAppServer(
     event: XcodexBridgeAppServerEvent,
   ): AgentStreamEventPayload | null {
@@ -1391,6 +1436,9 @@ export class Session {
         };
       }
       return { type: "turn_completed", provider: "xcodex" };
+    }
+    if (method === "x-codex/mobile/ingress" || method === "x-codex/desktop/ingress") {
+      return this.xcodexIngressStreamEvent(method, params);
     }
     return null;
   }
@@ -3340,6 +3388,61 @@ export class Session {
     }
   }
 
+  private async handleCreateXcodexAgentRequest(params: {
+    msg: Extract<SessionInboundMessage, { type: "create_agent_request" }>;
+    resolvedConfig: AgentSessionConfig;
+    trimmedPrompt: string | undefined;
+    requestId: string | undefined;
+    clientMessageId: string | undefined;
+    images: Extract<SessionInboundMessage, { type: "create_agent_request" }>["images"];
+    attachments: Extract<SessionInboundMessage, { type: "create_agent_request" }>["attachments"];
+  }): Promise<void> {
+    const { msg, resolvedConfig, trimmedPrompt, requestId, clientMessageId, images, attachments } =
+      params;
+    if (!this.xcodexBridge) {
+      throw new Error("xCodex bridge is not available");
+    }
+    const resolvedWorkspace = msg.workspaceId
+      ? await this.workspaceRegistry.get(msg.workspaceId)
+      : ((await this.findWorkspaceByDirectory(resolvedConfig.cwd)) ??
+        (await this.findOrCreateWorkspaceForDirectory(resolvedConfig.cwd)));
+    if (!resolvedWorkspace) {
+      throw new Error(`Workspace not found: ${msg.workspaceId}`);
+    }
+    const agentPayload = await this.xcodexBridge.createAgent({
+      workspaceId: resolvedWorkspace.workspaceId,
+      config: resolvedConfig,
+      initialPrompt: trimmedPrompt,
+      clientMessageId,
+      images,
+      attachments,
+    });
+    if (requestId) {
+      this.emit({
+        type: "status",
+        payload: {
+          status: "agent_created",
+          agentId: agentPayload.id,
+          requestId,
+          agent: agentPayload,
+        },
+      });
+    }
+    const subscription = this.agentUpdatesSubscription;
+    if (subscription) {
+      const project = this.xcodexBridge.buildProjectPlacement(agentPayload);
+      this.bufferOrEmitAgentUpdate(subscription, {
+        kind: "upsert",
+        agent: agentPayload,
+        project,
+      });
+    }
+    this.sessionLogger.info(
+      { agentId: agentPayload.id, provider: agentPayload.provider, clientMessageId },
+      `Created xCodex agent ${agentPayload.id} (${agentPayload.provider})`,
+    );
+  }
+
   /**
    * Handle create agent request
    */
@@ -3375,6 +3478,19 @@ export class Session {
         ...config,
         ...(provisionalTitle ? { title: provisionalTitle } : {}),
       };
+
+      if (resolvedConfig.provider === "xcodex") {
+        await this.handleCreateXcodexAgentRequest({
+          msg,
+          resolvedConfig,
+          trimmedPrompt,
+          requestId,
+          clientMessageId,
+          images,
+          attachments,
+        });
+        return;
+      }
 
       const firstAgentContext: FirstAgentContext = {
         ...(trimmedPrompt ? { prompt: trimmedPrompt } : {}),

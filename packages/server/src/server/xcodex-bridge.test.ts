@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createServer, type Socket } from "node:net";
 import { afterEach, test, expect } from "vitest";
 import pino from "pino";
@@ -12,6 +13,7 @@ import {
 } from "./messages.js";
 
 const tempDirs: string[] = [];
+const testDir = path.dirname(fileURLToPath(import.meta.url));
 
 interface HostBridgeTestRequest {
   kind?: string;
@@ -578,14 +580,27 @@ test("uses the create-agent timeout budget for UI-mediated xCodex thread creatio
           providerId: "provider-1",
           supplierId: "supplier-1",
           modelId: "model-1",
+          text: "hello",
+          messageId: "message-1",
         }),
       }),
     );
-    expect(createRequest?.payload).not.toHaveProperty("text");
-    expect(createRequest?.payload).not.toHaveProperty("messageId");
+    expect(createRequest?.payload).not.toHaveProperty("inputItems");
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+test("connector create-agent path does not enqueue the initial prompt a second time", async () => {
+  const source = await readFile(path.join(testDir, "xcodex-mobile-connector/main.ts"), "utf8");
+  const start = source.indexOf("private async handleCreateAgent");
+  const end = source.indexOf("private async handleCancelAgent", start);
+
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  const handleCreateAgentBody = source.slice(start, end);
+  expect(handleCreateAgentBody).toContain("this.bridge.createAgent");
+  expect(handleCreateAgentBody).not.toContain("this.bridge.sendMessage");
 });
 
 test("rejects when xCodex host bridge closes before a v2 response", async () => {

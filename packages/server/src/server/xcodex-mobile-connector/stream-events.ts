@@ -163,14 +163,20 @@ function userIngressEvent(
   if (text === null) {
     return null;
   }
-  const messageId = stringField(params, [
-    "sourceMessageId",
-    "source_message_id",
-    "messageId",
-    "message_id",
-    "ingressId",
-    "ingress_id",
-  ]);
+  const messageId =
+    method === "x-codex/mobile/ingress"
+      ? stringField(params, ["sourceMessageId", "source_message_id", "messageId", "message_id"])
+      : stringField(params, [
+          "sourceMessageId",
+          "source_message_id",
+          "messageId",
+          "message_id",
+          "ingressId",
+          "ingress_id",
+        ]);
+  if (method === "x-codex/mobile/ingress" && !messageId) {
+    return null;
+  }
   return timeline({
     type: "user_message",
     text,

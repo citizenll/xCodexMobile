@@ -27,7 +27,7 @@ import {
   type SendAgentMessageRequest,
 } from "../../shared/messages.js";
 import { createXcodexStreamEventMapper } from "./stream-events.js";
-import { buildXcodexBridgeEventRoute } from "./event-routing.js";
+import { buildXcodexBridgeEventRoute, xcodexThreadIdFromEvent } from "./event-routing.js";
 import { resolveEventWorkspaceUpsertPayload } from "./workspace-updates.js";
 
 declare const __XCODEX_CONNECTOR_VERSION__: string;
@@ -84,6 +84,16 @@ interface ProjectPlacement {
   projectName: string;
 }
 
+interface XcodexIngressLogFields {
+  seq: number | null | undefined;
+  workspaceId: string | null | undefined;
+  profileId: string | null | undefined;
+  threadId: string | null;
+  method: string;
+  ingressId: string | null;
+  sourceMessageId: string | null;
+}
+
 interface AgentFilter {
   labels?: Record<string, string>;
   projectKeys?: string[];
@@ -91,6 +101,45 @@ interface AgentFilter {
   includeArchived?: boolean;
   requiresAttention?: boolean;
   thinkingOptionId?: string | null;
+}
+
+function recordFromUnknown(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+function stringField(record: Record<string, unknown> | null, keys: string[]): string | null {
+  if (!record) {
+    return null;
+  }
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
+function isXcodexIngressMethod(method: string): boolean {
+  return method === "x-codex/mobile/ingress" || method === "x-codex/desktop/ingress";
+}
+
+function xcodexIngressLogFields(event: XcodexBridgeAppServerEvent): XcodexIngressLogFields | null {
+  const message = recordFromUnknown(event.payload.message);
+  const params = recordFromUnknown(message?.params);
+  const method = typeof message?.method === "string" ? message.method : "";
+  if (!isXcodexIngressMethod(method)) {
+    return null;
+  }
+  return {
+    seq: event.seq ?? event.payload.seq,
+    workspaceId: event.payload.workspaceId,
+    profileId: event.payload.profileId,
+    threadId: xcodexThreadIdFromEvent(event),
+    method,
+    ingressId: stringField(params, ["ingressId", "ingress_id"]),
+    sourceMessageId: stringField(params, ["sourceMessageId", "source_message_id"]),
+  };
 }
 
 interface FetchAgentsRequest {
@@ -1444,6 +1493,7 @@ class ClientSession {
         provider: request.config.provider,
         model: request.config.model,
         initialPromptLen: request.initialPrompt?.length ?? 0,
+        clientMessageId: request.clientMessageId ?? null,
         images: request.images?.length ?? 0,
         attachments: request.attachments?.length ?? 0,
       },
@@ -1480,38 +1530,6 @@ class ClientSession {
       const workspaceId = agent.labels["xcodex.workspaceId"];
       if (workspaceId) {
         void this.forwardWorkspaceUpdate(workspaceId);
-      }
-      const hasInitialMessage =
-        Boolean(request.initialPrompt?.trim()) ||
-        (request.images?.length ?? 0) > 0 ||
-        (request.attachments?.length ?? 0) > 0;
-      if (hasInitialMessage) {
-        void this.bridge
-          .sendMessage({
-            agentId: agent.id,
-            text: request.initialPrompt ?? "",
-            messageId: request.clientMessageId,
-            images: request.images,
-            attachments: request.attachments,
-          })
-          .then((result) => {
-            this.logger.info(
-              {
-                requestId: request.requestId,
-                agentId: agent.id,
-                accepted: result.accepted,
-                elapsedMs: Date.now() - startedAt,
-              },
-              "create_agent_initial_message_queued",
-            );
-            return undefined;
-          })
-          .catch((error) => {
-            this.logger.warn(
-              { err: error, requestId: request.requestId, agentId: agent.id },
-              "create_agent_initial_message_failed",
-            );
-          });
       }
     } catch (error) {
       this.logger.warn(
@@ -1776,12 +1794,30 @@ class ClientSession {
 
   private handleBridgeEvent(event: XcodexBridgeAppServerEvent) {
     if (!this.active) return;
+    const ingressLogFields = xcodexIngressLogFields(event);
     const route = buildXcodexBridgeEventRoute({
       event,
       hasAgentInterest: (agentId) => this.hasAgentInterest(agentId),
       mapStreamEvent: (bridgeEvent) => this.xcodexStreamEvents.fromAppServer(bridgeEvent),
     });
-    if (!route) return;
+    if (!route) {
+      if (ingressLogFields) {
+        this.logger.info(ingressLogFields, "xcodex_bridge_ingress_unrouted");
+      }
+      return;
+    }
+    if (ingressLogFields) {
+      this.logger.info(
+        {
+          ...ingressLogFields,
+          agentId: route.agentId,
+          hasInterest: this.hasAgentInterest(route.agentId),
+          streamEventType: route.agentStreamPayload?.event.type ?? null,
+          refreshDirectory: route.refreshDirectory,
+        },
+        "xcodex_bridge_ingress_routed",
+      );
+    }
     if (route.agentStreamPayload) {
       this.sendSession({ type: "agent_stream", payload: route.agentStreamPayload });
     }

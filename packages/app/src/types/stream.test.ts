@@ -11,7 +11,7 @@ import {
   isAgentToolCallItem,
 } from "./stream";
 import type { AgentProvider, ToolCallDetail } from "@server/server/agent/agent-sdk-types";
-import type { AgentStreamEventPayload } from "@server/shared/messages";
+import type { AgentAttachment, AgentStreamEventPayload } from "@server/shared/messages";
 import { buildToolCallDisplayModel } from "../../../server/src/shared/tool-call-display";
 
 type CanonicalToolStatus = "running" | "completed" | "failed" | "canceled";
@@ -755,6 +755,46 @@ describe("stream reducer canonical tool calls", () => {
     assert.ok(message);
     assert.strictEqual(message.id, messageId);
     assert.deepStrictEqual(message.images, optimisticImages);
+    assert.strictEqual(message.timestamp.getTime(), authoritativeTimestamp.getTime());
+  });
+
+  it("preserves optimistic user message attachments when authoritative user message arrives", () => {
+    const messageId = "msg-user-attachments";
+    const attachments: AgentAttachment[] = [
+      {
+        type: "review",
+        mimeType: "application/paseo-review",
+        cwd: "/repo",
+        mode: "base",
+        comments: [],
+      },
+    ];
+    const initialState: StreamItem[] = [
+      {
+        kind: "user_message",
+        id: messageId,
+        text: "Review this",
+        timestamp: new Date("2025-01-01T11:15:00Z"),
+        attachments,
+      },
+    ];
+    const event: AgentStreamEventPayload = {
+      type: "timeline",
+      provider: "claude",
+      item: {
+        type: "user_message",
+        text: "Review this",
+        messageId,
+      },
+    };
+    const authoritativeTimestamp = new Date("2025-01-01T11:15:01Z");
+
+    const state = reduceStreamUpdate(initialState, event, authoritativeTimestamp);
+    const message = state.find((item) => item.kind === "user_message");
+
+    assert.ok(message);
+    assert.strictEqual(message.id, messageId);
+    assert.deepStrictEqual(message.attachments, attachments);
     assert.strictEqual(message.timestamp.getTime(), authoritativeTimestamp.getTime());
   });
 

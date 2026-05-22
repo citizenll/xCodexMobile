@@ -264,6 +264,32 @@ function removeOptimisticUserMessageFromStream(input: {
   setAgentStreamTail(serverId, (prev) => removeUserMessageFromStreamMap(prev, agentId, messageId));
 }
 
+function appendOptimisticUserMessageToStream(input: {
+  serverId: string;
+  agentId: string;
+  userMessage: StreamItem;
+  setAgentStreamTail: SetAgentStreamTail;
+  setAgentStreamHead: SetAgentStreamHead;
+}): void {
+  const { serverId, agentId, userMessage, setAgentStreamTail, setAgentStreamHead } = input;
+  const currentHead = useSessionStore.getState().sessions[serverId]?.agentStreamHead?.get(agentId);
+  if (currentHead && currentHead.length > 0) {
+    setAgentStreamHead(serverId, (prev) => {
+      const head = prev.get(agentId) || [];
+      const updated = new Map(prev);
+      updated.set(agentId, [...head, userMessage]);
+      return updated;
+    });
+    return;
+  }
+  setAgentStreamTail(serverId, (prev) => {
+    const currentStream = prev.get(agentId) || [];
+    const updated = new Map(prev);
+    updated.set(agentId, [...currentStream, userMessage]);
+    return updated;
+  });
+}
+
 function clearAgentInitializingFlag(
   setInitializingAgents: SetInitializingAgents,
   serverId: string,
@@ -1232,6 +1258,22 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       const parsedTimestamp = new Date(timestamp);
       const streamEvent = event;
       if (
+        event.type === "timeline" &&
+        event.item.type === "user_message" &&
+        typeof event.item.messageId === "string" &&
+        event.item.messageId.startsWith("msg_")
+      ) {
+        console.info("[xCodex mobile-debug] agentStream user timeline received", {
+          serverId,
+          agentId,
+          seq,
+          epoch,
+          timestamp,
+          messageId: event.item.messageId,
+          textLen: event.item.text.length,
+        });
+      }
+      if (
         event.type === "turn_started" ||
         event.type === "turn_completed" ||
         event.type === "turn_failed" ||
@@ -1708,6 +1750,14 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       }
 
       const messageId = generateMessageId();
+      console.info("[xCodex mobile-debug] sendAgentMessage optimistic append", {
+        serverId,
+        agentId,
+        messageId,
+        textLen: message.length,
+        images: images?.length ?? 0,
+        attachments: attachments?.length ?? 0,
+      });
       const userMessage: StreamItem = {
         kind: "user_message",
         id: messageId,
@@ -1720,30 +1770,24 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       // Append to head if streaming (keeps the user message with the current
       // turn so late text_deltas still find the existing assistant_message).
       // Otherwise append to tail.
-      const currentHead = useSessionStore
-        .getState()
-        .sessions[serverId]?.agentStreamHead?.get(agentId);
-      if (currentHead && currentHead.length > 0) {
-        setAgentStreamHead(serverId, (prev) => {
-          const head = prev.get(agentId) || [];
-          const updated = new Map(prev);
-          updated.set(agentId, [...head, userMessage]);
-          return updated;
-        });
-      } else {
-        setAgentStreamTail(serverId, (prev) => {
-          const currentStream = prev.get(agentId) || [];
-          const updated = new Map(prev);
-          updated.set(agentId, [...currentStream, userMessage]);
-          return updated;
-        });
-      }
+      appendOptimisticUserMessageToStream({
+        serverId,
+        agentId,
+        userMessage,
+        setAgentStreamTail,
+        setAgentStreamHead,
+      });
 
       try {
         await client.sendAgentMessage(agentId, message, {
           messageId,
           ...(imagesData && imagesData.length > 0 ? { images: imagesData } : {}),
           ...(attachments && attachments.length > 0 ? { attachments } : {}),
+        });
+        console.info("[xCodex mobile-debug] sendAgentMessage accepted", {
+          serverId,
+          agentId,
+          messageId,
         });
       } catch (error) {
         removeOptimisticUserMessageFromStream({
@@ -1753,7 +1797,12 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
           setAgentStreamTail,
           setAgentStreamHead,
         });
-        console.error("[Session] Failed to send agent message:", error);
+        console.error("[xCodex mobile-debug] sendAgentMessage failed", {
+          serverId,
+          agentId,
+          messageId,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     },
     [serverId, client, setAgentStreamTail, setAgentStreamHead],
@@ -1823,6 +1872,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       git,
       worktreeName,
       requestId,
+      clientMessageId,
     }: {
       config: AgentSessionConfig;
       initialPrompt: string;
@@ -1831,6 +1881,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       git?: GitSetupOptions;
       worktreeName?: string;
       requestId?: string;
+      clientMessageId?: string;
     }) => {
       if (!client) {
         console.warn("[Session] createAgent skipped: daemon unavailable");
@@ -1851,6 +1902,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         ...(git ? { git } : {}),
         ...(worktreeName ? { worktreeName } : {}),
         ...(requestId ? { requestId } : {}),
+        ...(clientMessageId ? { clientMessageId } : {}),
       });
     },
     [client],
