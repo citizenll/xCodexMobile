@@ -3,7 +3,7 @@
 > xCodex 移动端连接器源码仓库。默认中文说明，English version below.
 
 <p align="center">
-  <img src="docs/xcodex-mobile-banner.svg" alt="xCodex Mobile Connector" width="100%">
+  <img src="docs/xcodex-mobile-banner.png" alt="xCodex Mobile Connector" width="100%">
 </p>
 
 <p align="center">
