@@ -1,203 +1,141 @@
-<p align="center">
-  <img src="packages/website/public/logo.svg" width="64" height="64" alt="Paseo logo">
-</p>
+# xCodex Mobile Connector
 
-<h1 align="center">Paseo</h1>
+> xCodex 移动端连接器源码仓库。默认中文说明，English version below.
 
 <p align="center">
-  <a href="https://github.com/getpaseo/paseo/stargazers">
-    <img src="https://img.shields.io/github/stars/getpaseo/paseo?style=flat&logo=github" alt="GitHub stars">
-  </a>
-  <a href="https://github.com/getpaseo/paseo/releases">
-    <img src="https://img.shields.io/github/v/release/getpaseo/paseo?style=flat&logo=github" alt="GitHub release">
-  </a>
-  <a href="https://x.com/moboudra">
-    <img src="https://img.shields.io/badge/%40moboudra-555?logo=x" alt="X">
-  </a>
-  <a href="https://discord.gg/jz8T2uahpH">
-    <img src="https://img.shields.io/badge/Discord-555?logo=discord" alt="Discord">
-  </a>
-</p>
-
-<p align="center">One interface for all your Claude Code, Codex and OpenCode agents.</p>
-
-<p align="center">
-  <img src="https://paseo.sh/hero-mockup.png" alt="Paseo app screenshot" width="100%">
+  <img src="docs/xcodex-mobile-banner.svg" alt="xCodex Mobile Connector" width="100%">
 </p>
 
 <p align="center">
-  <img src="https://paseo.sh/mobile-mockup.png" alt="Paseo mobile app" width="100%">
+  <a href="#english">English README</a> |
+  <a href="https://github.com/citizenll/xcodex">xCodex 下载与发布</a> |
+  <a href="#许可与上游说明">许可与上游说明</a>
 </p>
+
+## 项目定位
+
+xCodex Mobile Connector 是 xCodex 的移动端桥接组件，用于把手机端的请求、会话创建、消息发送和流式事件接入 xCodex 桌面运行时。
+
+它不是 xCodex 私有桌面应用源码的一部分。xCodex 的发布流水线会从这个公开仓库构建连接器产物，再把构建结果作为独立运行资源交给桌面端使用。这样可以把 AGPL 组件的源码、修改记录和构建入口清晰公开，同时让 xCodex 主应用仓库保持独立。
+
+## 它负责什么
+
+- 发现并连接 xCodex 桌面端 host。
+- 将移动端创建会话、发送消息、附件和图片请求转发到 xCodex 桌面线程。
+- 将桌面端 agent 事件、timeline、状态变更和工作区更新流式回传到移动端。
+- 产出 `xcodex-mobile-connector.mjs`，供 xCodex 发布流水线打包为运行资源。
+
+## 和 xCodex 的关系
+
+本仓库维护的是移动连接协议和连接器实现。xCodex 桌面端通过明确的 WebSocket / JSON 消息协议与该连接器交互；桌面主仓库不直接内置本仓库源码。
+
+在 xCodex 发布流程中：
+
+1. GitHub Actions 拉取本仓库源码。
+2. 执行 `npm run build:xcodex-connector`。
+3. 生成 `packages/server/dist/xcodex-connector/xcodex-mobile-connector.mjs`。
+4. xCodex 桌面发布脚本把该文件写入资源清单，并通过 OSS / release channel 分发。
+
+## 构建
+
+```bash
+npm install
+npm run build:xcodex-connector
+```
+
+产物位置：
+
+```text
+packages/server/dist/xcodex-connector/xcodex-mobile-connector.mjs
+packages/server/dist/xcodex-connector/manifest.json
+```
+
+## 验证
+
+```bash
+npm run test:unit --workspace=@getpaseo/server -- \
+  src/server/xcodex-bridge.test.ts \
+  src/server/xcodex-mobile-connector/stream-events.test.ts
+```
+
+仓库提交钩子还会运行 lint、format check 和 typecheck。
+
+## 源码可用性
+
+本仓库是 xCodex 移动连接器的对应源码位置。若你通过 xCodex 桌面版、移动端或网络连接能力使用到该连接器，本仓库用于提供可查看、可修改、可重新构建的对应源码。
+
+## 许可与上游说明
+
+本仓库基于 [Paseo](https://github.com/getpaseo/paseo) 修改而来，保留上游版权声明和 AGPL-3.0-or-later 许可证。
+
+- 上游项目：`getpaseo/paseo`
+- 当前修改版：`citizenll/xcodex-mobile`
+- 许可证：AGPL-3.0-or-later，见 [LICENSE](LICENSE)
+
+修改版主要面向 xCodex 的移动端连接协议、桌面桥接、事件路由和发布产物构建。仓库名称、README 和产品描述已调整为 xCodex 组件定位；这些更名不改变 AGPL 许可义务，也不移除上游版权归属。
 
 ---
 
-Run agents in parallel on your own machines. Ship from your phone or your desk.
+## English
 
-- **Self-hosted:** Agents run on your machine with your full dev environment. Use your tools, your configs, and your skills.
-- **Multi-provider:** Claude Code, Codex, and OpenCode through the same interface. Pick the right model for each job.
-- **Voice control:** Dictate tasks or talk through problems in voice mode. Hands-free when you need it.
-- **Cross-device:** iOS, Android, desktop, web, and CLI. Start work at your desk, check in from your phone, script it from the terminal.
-- **Privacy-first:** Paseo doesn't have any telemetry, tracking, or forced log-ins.
+# xCodex Mobile Connector
 
-## Getting Started
+xCodex Mobile Connector is the public source repository for the mobile bridge used by xCodex. It connects mobile clients to the xCodex desktop runtime and forwards session creation, messages, attachments, and streaming agent events.
 
-Paseo runs a local server called the daemon that manages your coding agents. Clients like the desktop app, mobile app, web app, and CLI connect to it.
+This repository is not the private xCodex desktop application source tree. The desktop release pipeline builds this connector from this public repository and consumes the generated connector artifact as an independent runtime resource.
 
-### Prerequisites
+## Responsibilities
 
-You need at least one agent CLI installed and configured with your credentials:
+- Discover and connect to the xCodex desktop host.
+- Forward mobile session creation, message, attachment, and image requests into xCodex desktop threads.
+- Stream desktop agent events, timeline updates, status changes, and workspace updates back to mobile clients.
+- Produce `xcodex-mobile-connector.mjs` for the xCodex release pipeline.
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
-- [Codex](https://github.com/openai/codex)
-- [OpenCode](https://github.com/anomalyco/opencode)
+## Relationship To xCodex
 
-### Desktop app (recommended)
+This repository maintains the mobile connection protocol and connector implementation. xCodex desktop talks to it through an explicit WebSocket / JSON message boundary, and the desktop source repository does not vendor this source tree.
 
-Download it from [paseo.sh/download](https://paseo.sh/download) or the [GitHub releases page](https://github.com/getpaseo/paseo/releases). Open the app and the daemon starts automatically. Nothing else to install.
+In the xCodex release flow:
 
-To connect from your phone, scan the QR code shown in Settings.
+1. GitHub Actions checks out this repository.
+2. The workflow runs `npm run build:xcodex-connector`.
+3. The build emits `packages/server/dist/xcodex-connector/xcodex-mobile-connector.mjs`.
+4. The xCodex desktop release scripts include that generated artifact in the runtime resource manifest and distribute it through the update channel.
 
-### CLI / headless
-
-Install the CLI and start Paseo:
+## Build
 
 ```bash
-npm install -g @getpaseo/cli
-paseo
+npm install
+npm run build:xcodex-connector
 ```
 
-This shows a QR code in the terminal. Connect from any client. This path is useful for servers and remote machines.
+Output:
 
-For full setup and configuration, see:
+```text
+packages/server/dist/xcodex-connector/xcodex-mobile-connector.mjs
+packages/server/dist/xcodex-connector/manifest.json
+```
 
-- [Docs](https://paseo.sh/docs)
-- [Configuration reference](https://paseo.sh/docs/configuration)
-
-## CLI
-
-Everything you can do in the app, you can do from the terminal.
+## Test
 
 ```bash
-paseo run --provider claude/opus-4.6 "implement user authentication"
-paseo run --provider codex/gpt-5.4 --worktree feature-x "implement feature X"
-
-paseo ls                           # list running agents
-paseo attach abc123                # stream live output
-paseo send abc123 "also add tests" # follow-up task
-
-# run on a remote daemon
-paseo --host workstation.local:6767 run "run the full test suite"
+npm run test:unit --workspace=@getpaseo/server -- \
+  src/server/xcodex-bridge.test.ts \
+  src/server/xcodex-mobile-connector/stream-events.test.ts
 ```
 
-See the [full CLI reference](https://paseo.sh/docs/cli) for more.
+The repository pre-commit hook also runs lint, format check, and typecheck.
 
-## Skills
+## Source Availability
 
-Skills teach your agent to use Paseo to orchestrate other agents.
+This repository is the corresponding source location for the xCodex mobile connector. If you use the connector through xCodex desktop, mobile, or network-facing connection features, this repository provides the source needed to inspect, modify, and rebuild the connector.
 
-```bash
-npx skills add getpaseo/paseo
-```
+## License And Upstream Notice
 
-Then use them in any agent conversation:
+This repository is derived from [Paseo](https://github.com/getpaseo/paseo). It preserves the upstream copyright notice and remains licensed under AGPL-3.0-or-later.
 
-- `/paseo-handoff` — hand off work between agents. I use this to plan with Claude and then handoff to Codex to implement.
-- `/paseo-loop` — loop an agent against clear acceptance criteria (aka Ralph loops), optionally with a verifier.
-- `/paseo-advisor` — spin up a single agent as an advisor for a second opinion, without delegating the work itself.
-- `/paseo-committee` — form a committee of two contrasting agents to step back, do root cause analysis, and produce a plan.
+- Upstream project: `getpaseo/paseo`
+- Modified version: `citizenll/xcodex-mobile`
+- License: AGPL-3.0-or-later, see [LICENSE](LICENSE)
 
-## Development
-
-Quick monorepo package map:
-
-- `packages/server`: Paseo daemon (agent process orchestration, WebSocket API, MCP server)
-- `packages/app`: Expo client (iOS, Android, web)
-- `packages/cli`: `paseo` CLI for daemon and agent workflows
-- `packages/desktop`: Electron desktop app
-- `packages/relay`: Relay package for remote connectivity
-- `packages/website`: Marketing site and documentation (`paseo.sh`)
-
-Common commands:
-
-```bash
-# run all local dev services
-npm run dev
-
-# run individual surfaces
-npm run dev:server
-npm run dev:app
-npm run dev:desktop
-npm run dev:website
-
-# build the daemon
-npm run build:daemon
-
-# repo-wide checks
-npm run typecheck
-```
-
-## Community
-
-- [paseo-relay](https://github.com/zenghongtu/paseo-relay) — self-hosted relay in Go
-
-### Self-hosted relay TLS
-
-Self-hosted relays use `ws://` unless TLS is opted in. For a relay behind nginx on 443, start the daemon with:
-
-```bash
-PASEO_RELAY_ENDPOINT=127.0.0.1:8080 \
-PASEO_RELAY_PUBLIC_ENDPOINT=relay.example.com:443 \
-PASEO_RELAY_USE_TLS=true \
-paseo daemon start
-```
-
-Equivalent config:
-
-```json
-{
-  "daemon": {
-    "relay": {
-      "enabled": true,
-      "endpoint": "127.0.0.1:8080",
-      "publicEndpoint": "relay.example.com:443",
-      "useTls": true
-    }
-  }
-}
-```
-
-Minimal nginx WebSocket proxy:
-
-```nginx
-server {
-  listen 443 ssl;
-  server_name relay.example.com;
-
-  ssl_certificate /etc/letsencrypt/live/relay.example.com/fullchain.pem;
-  ssl_certificate_key /etc/letsencrypt/live/relay.example.com/privkey.pem;
-
-  location /ws {
-    proxy_pass http://127.0.0.1:8080;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_set_header Host $host;
-  }
-}
-```
-
----
-
-<p align="center">
-  <a href="https://star-history.com/#getpaseo/paseo&Date">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=getpaseo/paseo&type=Date&theme=dark">
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=getpaseo/paseo&type=Date">
-      <img src="https://api.star-history.com/svg?repos=getpaseo/paseo&type=Date" alt="Star history chart for getpaseo/paseo" width="600" style="max-width: 100%;">
-    </picture>
-  </a>
-</p>
-
-## License
-
-AGPL-3.0
+The modified version focuses on xCodex mobile connection protocol, desktop bridging, event routing, and release artifact generation. Renaming the repository and README to xCodex branding does not change the AGPL obligations or remove upstream attribution.
